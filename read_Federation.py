@@ -106,9 +106,7 @@ class catalogAgent( object ):
     # open the file
     file = file+'?metalink'
     f = self.gfal2.open(file, 'r')
-    # read first 10 bytesthe max_size first bytes.
     
-    # Hex dump
     xml_string = []
     while True:
       content = f.read(200)
