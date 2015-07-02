@@ -48,6 +48,8 @@ class catalogAgent( object ):
     * Possible: Once we leave a directory, add the path to a file so in case the crawler crashes, we won't check
       this directory again
 
+    :param self: self reference
+    :param str basepath: path that we want to the the information from
     """
     directories = []
     files = []
