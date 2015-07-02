@@ -21,15 +21,34 @@ from stat import S_ISREG, S_ISDIR, S_IXUSR, S_IRUSR, S_IWUSR, \
 class catalogAgent( object ):
 
   def initialize( self ):
+    """
+    Setting up the crawler with a gfal2 context, a file catalog handle and an empty file dict
+    :param self: self reference
+    """
     self.gfal2  = gfal2.creat_context()
     self.rootURL = 'http://federation.desy.de/fed/'
     self.fileDict = {}
     self.fc = FileCatalog()
 
   def execute( self ):
+    """
+    Run the crawler
+    :param self: self reference
+    """
     self.__crawl( self.rootURL )
 
   def __crawl( self, basepath ):
+    """ Crawler, starts with the first call from the rootURL and goes on from there. 
+
+    * List all the content of the current directory and stat-call each entry and put files in the files list and directories 
+      in the directories list. 
+    * For all files retrieve the XML data and extract the PFNs and add them to the fileDict.
+    * Once all file PFNs have been extracted and the fileDict is still small enough, go a directory deeper
+    * If the fileDict is big enough, compare each file with the file catalog
+    * Possible: Once we leave a directory, add the path to a file so in case the crawler crashes, we won't check
+      this directory again
+
+    """
     directories = []
     files = []
     entries = self.gfal2.listdir( basepath )
@@ -69,11 +88,14 @@ class catalogAgent( object ):
     for afile, pfnlist in self.fileDict.items():
       res = fc.getReplicas( afile )
       if not res['OK']:
+        pass
 
     pass
 
 
   def __lookForDarkData( self ):
+    """
+    """
     testfile = 'http://federation.desy.de/fed/lhcb/LHCb/Collision12/BHADRON.MDST/00030613/0000/00030613_00000001_1.bhadron.mdst?metalink'
     xml_string = self.__readFile( testfile )
     PFNs = self.__extractPFNs( xml_string )
@@ -108,6 +130,13 @@ class catalogAgent( object ):
 
 
   def __extractPFNs( self, xml_string ):
+    """ Extract the url elements of the xml string
+
+    :param self: self reference
+    :param str xml_string: string containing the xml information of the file
+    :return list PFNs: list of the pfns for each url element.
+
+    """
     PFNs = []
     root = ET.fromstring( xml_string )
     urls = root.findall('.//{http://www.metalinker.org/}url')
