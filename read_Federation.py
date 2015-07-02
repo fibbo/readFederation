@@ -94,14 +94,6 @@ class catalogAgent( object ):
 
     pass
 
-
-  def __lookForDarkData( self ):
-    """
-    """
-    testfile = 'http://federation.desy.de/fed/lhcb/LHCb/Collision12/BHADRON.MDST/00030613/0000/00030613_00000001_1.bhadron.mdst?metalink'
-    xml_string = self.__readFile( testfile )
-    PFNs = self.__extractPFNs( xml_string )
-    print PFNs
       
   def __readFile( self, file ):
     """ Read the xml data from the file. Using gfal2.open to open file and read
