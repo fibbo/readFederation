@@ -2,12 +2,17 @@ import sys
 import os
 import string
 import xml.etree.ElementTree as ET
-import re
 import gfal2
+import errno
+import time
+from collections import deque
 
+##### remove this part once it's integrated as agent #
 from DIRAC.Core.Base.Script import parseCommandLine
 from symbol import parameters
 parseCommandLine()
+######################################################
+
 
 from DIRAC import gLogger, S_ERROR, S_OK
 import pdb
@@ -30,12 +35,72 @@ class catalogAgent( object ):
     self.fileDict = {}
     self.fc = FileCatalog()
 
+    self.failedFiles = []
+
   def execute( self ):
     """
     Run the crawler
     :param self: self reference
     """
     self.__crawl( self.rootURL )
+
+  def __queueCrawl( self ):
+    """
+    Breadth first crawler. Starts at root URL which we add to the queue
+
+    * While queue is not empty:
+      * List directory
+      * For entry in entries if it's a file, read XML and store it to self.fileDict
+      * If it's a directory, add it to the directory_queue
+    """
+    directory_queue = deque([self.rootURL])
+  
+
+    # do this as long as queue is not empty
+    while (len(directory_queue)):
+      # try to list directory
+      entries = []
+      path = directory_queue.popleft()
+
+      # Try to list the directory
+      tries = 0
+      while True and tries < 10:
+        try:
+          entries = self.gfal2.listdir( path )
+          break
+        except gfal2.GError, e:
+          if e.code == errno.ENOENT:
+            # path doesn't exist, stop tyring
+            break
+          else:
+            # don't spam the server
+            time.sleep(4)
+
+      for entry in entries:
+        path = os.path.join( path, entry )
+        res = self.__isFile( path )
+        if not res['OK']:
+          self.failedFiles.append( {res['Message'][0] : res['Message'][1]} )
+          break
+        
+        # if res['Value'] is true then it's a file  
+        if res['Value']:
+          res = self.__readFile( path )
+          if not res['OK']:
+            self.failedFiles[ {path : 'Failed to read xml data.'}]
+          xml_string = res['Value']
+          PFNs = self.__extractPFNs( xml_string )
+          self.fileDict[path] = PFNs
+
+        # it's a directory, add it to the queue
+        else:
+          directory_queue.append( path )
+
+      if len(self.fileDict) > 40:
+        self.__compareDictWithCatalog()
+
+
+
 
   def __crawl( self, basepath ):
     """ Crawler, starts with the first call from the rootURL and goes on from there. 
@@ -51,19 +116,32 @@ class catalogAgent( object ):
     :param self: self reference
     :param str basepath: path that we want to the the information from
     """
+    
     directories = []
     files = []
-    entries = self.gfal2.listdir( basepath )
+
+    tries = 0
+    while True and tries < 10:
+      try:
+        entries = self.gfal2.listdir( basepath )
+        break
+      except gfal2.GError, e:
+        if e.code == errno.ENOENT:
+          break
+        else:
+          tries += 1
 
     for entry in entries:
-      path = '/'.join( [basepath, entry] )
-      if isFile( path ):
+      path = os.path.join( basepath, entry )
+      if self.__isFile( path ):
         files.append( path )
       else:
         directories.append( path )
 
     for afile in files:
-      xml_string = self.__readFile( afile )
+      res = self.__readFile( afile )
+      if not res['OK']:
+        print 'Error: %s' % res['Message']
       PFNs = self.__extractPFNs( xml_string )
       self.fileDict[afile] = PFNs
 
@@ -77,6 +155,19 @@ class catalogAgent( object ):
 
 
 
+  def __isFile( self, path ):
+    tries = 0
+    while True and tries < 10:
+      try:
+        statInfo = self.gfal2.stat( path )
+
+      except gfal2.GError, e:
+        res = S_ERROR( (e.code, e.message) )
+        tries += 1
+
+      return S_OK( S_ISREG( statInfo.st_mode ) )
+
+    return res
 
   def __compareDictWithCatalog( self ):
     """ Poll the filecatalog with the keys in self.fileDict and compare the catalog entries with the values of the fileDict.
@@ -94,8 +185,8 @@ class catalogAgent( object ):
 
     pass
 
-      
-  def __readFile( self, file ):
+
+  def __readFile( self, afile ):
     """ Read the xml data from the file. Using gfal2.open to open file and read
         the content and write it into a string.
 
@@ -104,21 +195,21 @@ class catalogAgent( object ):
         :return str xml_string: a string containing the xml information of file
     """
     # open the file
-    file = file+'?metalink'
-    f = self.gfal2.open(file, 'r')
-    
-    xml_string = []
-    while True:
-      content = f.read(200)
-      if not content:
+    afile = afile+'?metalink'
+    tries = 0
+    while True and tries < 10:
+      try:
+        f = self.gfal2.open(afile, 'r')
         break
-      for byte in content:
-        if byte in string.printable:
-          xml_string.append(byte)
+      except gfal2.GError, e:
+        if e.code == errno.ENOENT:
+          return S_ERROR( 'File does not exist' )
         else:
-          xml_string.append('.')
-    xml_string = ''.join(xml_string)
-    return xml_string
+          tries += 1
+    
+    content = f.read(10000)
+    xml_string = content
+    return S_OK( xml_string )
 
 
   def __extractPFNs( self, xml_string ):
@@ -143,5 +234,7 @@ class catalogAgent( object ):
 if __name__ == '__main__':  
   CA = catalogAgent()
   CA.initialize()
-  CA.execute()
+  #CA.execute()
+  print CA._catalogAgent__readFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/062426_0000000001.raw' )
+  
 
