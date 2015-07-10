@@ -36,6 +36,7 @@ class catalogAgent( object ):
     self.fc = FileCatalog()
 
     self.failedFiles = []
+    self.sleepTime = 4
 
   def execute( self ):
     """
@@ -46,7 +47,8 @@ class catalogAgent( object ):
 
   def __queueCrawl( self ):
     """
-    Breadth first crawler. Starts at root URL which we add to the queue
+    Breadth first crawler. Starts at root URL which we add to the queue adds every directory it finds to the queue.
+    Non-recursive method.
 
     * While queue is not empty:
       * List directory
@@ -70,11 +72,12 @@ class catalogAgent( object ):
           break
         except gfal2.GError, e:
           if e.code == errno.ENOENT:
-            # path doesn't exist, stop tyring
+            # path doesn't exist, stop tyring. Should never happen in theory.
+            self.failedFiles.append( { path : 'File does not exist'} )
             break
           else:
             # don't spam the server
-            time.sleep(4)
+            time.sleep(self.sleepTime)
 
       for entry in entries:
         path = os.path.join( path, entry )
@@ -116,7 +119,7 @@ class catalogAgent( object ):
     :param self: self reference
     :param str basepath: path that we want to the the information from
     """
-    
+
     directories = []
     files = []
 
@@ -130,6 +133,7 @@ class catalogAgent( object ):
           break
         else:
           tries += 1
+          time.sleep(self.sleepTime)
 
     for entry in entries:
       path = os.path.join( basepath, entry )
@@ -164,9 +168,11 @@ class catalogAgent( object ):
       except gfal2.GError, e:
         res = S_ERROR( (e.code, e.message) )
         tries += 1
+        time.sleep(self.sleepTime)
 
       return S_OK( S_ISREG( statInfo.st_mode ) )
 
+    # if reading file wasn't successful we return the last error
     return res
 
   def __compareDictWithCatalog( self ):
@@ -206,6 +212,7 @@ class catalogAgent( object ):
           return S_ERROR( 'File does not exist' )
         else:
           tries += 1
+          time.sleep(self.sleepTime)
     
     content = f.read(10000)
     xml_string = content
@@ -236,5 +243,5 @@ if __name__ == '__main__':
   CA.initialize()
   #CA.execute()
   print CA._catalogAgent__readFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/062426_0000000001.raw' )
-  
+  print CA._catalogAgent__isFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/' )
 
