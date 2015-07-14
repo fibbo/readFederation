@@ -31,7 +31,7 @@ class catalogAgent( object ):
     :param self: self reference
     """
     self.gfal2  = gfal2.creat_context()
-    self.rootURL = 'http://eoslhcb.cern.ch:8443/eos/lhcb/user/p/pgloor'
+    self.rootURL = '/home/phi/dev/UnitTests/Workflow'
     self.fileDict = {}
     self.fc = FileCatalog()
 
@@ -44,7 +44,7 @@ class catalogAgent( object ):
     Run the crawler
     :param self: self reference
     """
-    self.__queueCrawl()
+    self.__crawl( self.rootURL )
 
   def __queueCrawl( self ):
     """
@@ -121,13 +121,13 @@ class catalogAgent( object ):
     :param self: self reference
     :param str basepath: path that we want to the the information from
     """
-
+    print basepath
     directories = []
 
     tries = 0
     while True and tries < 10:
       try:
-        entries = os.path.listdir( basepath )
+        entries = os.listdir( basepath )
         break
       except gfal2.GError, e:
         if e.code == errno.ENOENT:
@@ -145,10 +145,13 @@ class catalogAgent( object ):
       
       # if res['Value'] is true then it's a file  
       if res['Value']:
-        pass
+        print path
+
+      else:
+        directories.append( path )
 
     if len(self.fileDict) > 40:
-      self.__compareDictWithCatalog()
+      print 'checking catalog'
 
     for directory in directories:
       self.__crawl( directory )
