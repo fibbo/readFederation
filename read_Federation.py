@@ -31,11 +31,12 @@ class catalogAgent( object ):
     :param self: self reference
     """
     self.gfal2  = gfal2.creat_context()
-    self.rootURL = 'http://federation.desy.de/fed/'
+    self.rootURL = 'http://eoslhcb.cern.ch:8443/eos/lhcb/user/p/pgloor'
     self.fileDict = {}
     self.fc = FileCatalog()
 
     self.failedFiles = []
+    self.failedDirectories = []
     self.sleepTime = 4
 
   def execute( self ):
@@ -43,7 +44,7 @@ class catalogAgent( object ):
     Run the crawler
     :param self: self reference
     """
-    self.__crawl( self.rootURL )
+    self.__queueCrawl()
 
   def __queueCrawl( self ):
     """
@@ -56,7 +57,6 @@ class catalogAgent( object ):
       * If it's a directory, add it to the directory_queue
     """
     directory_queue = deque([self.rootURL])
-  
 
     # do this as long as queue is not empty
     while (len(directory_queue)):
@@ -68,12 +68,13 @@ class catalogAgent( object ):
       tries = 0
       while True and tries < 10:
         try:
+          import pdb; pdb.set_trace()
           entries = self.gfal2.listdir( path )
           break
         except gfal2.GError, e:
           if e.code == errno.ENOENT:
             # path doesn't exist, stop tyring. Should never happen in theory.
-            self.failedFiles.append( { path : 'File does not exist'} )
+            self.failedDirectories.append( { path : 'Path does not exist'} )
             break
           else:
             # don't spam the server
@@ -241,7 +242,7 @@ class catalogAgent( object ):
 if __name__ == '__main__':  
   CA = catalogAgent()
   CA.initialize()
-  #CA.execute()
-  print CA._catalogAgent__readFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/062426_0000000001.raw' )
-  print CA._catalogAgent__isFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/' )
+  CA.execute()
+  #print CA._catalogAgent__readFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/062426_0000000001.raw' )
+  #print CA._catalogAgent__isFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/' )
 
