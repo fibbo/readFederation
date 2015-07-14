@@ -78,27 +78,28 @@ class catalogAgent( object ):
             break
           else:
             # don't spam the server
+            tries += 1
             time.sleep(self.sleepTime)
 
       for entry in entries:
-        path = os.path.join( path, entry )
-        res = self.__isFile( path )
+        epath = os.path.join( path, entry )
+        res = self.__isFile( epath )
         if not res['OK']:
           self.failedFiles.append( {res['Message'][0] : res['Message'][1]} )
           break
         
         # if res['Value'] is true then it's a file  
         if res['Value']:
-          res = self.__readFile( path )
+          res = self.__readFile( epath )
           if not res['OK']:
-            self.failedFiles[ {path : 'Failed to read xml data.'}]
+            self.failedFiles[ {epath : 'Failed to read xml data.'}]
           xml_string = res['Value']
           PFNs = self.__extractPFNs( xml_string )
-          self.fileDict[path] = PFNs
+          self.fileDict[epath] = PFNs
 
         # it's a directory, add it to the queue
         else:
-          directory_queue.append( path )
+          directory_queue.append( epath )
 
       if len(self.fileDict) > 40:
         self.__compareDictWithCatalog()
@@ -122,7 +123,6 @@ class catalogAgent( object ):
     """
 
     directories = []
-    files = []
 
     tries = 0
     while True and tries < 10:
@@ -138,17 +138,19 @@ class catalogAgent( object ):
 
     for entry in entries:
       path = os.path.join( basepath, entry )
-      if self.__isFile( path ):
-        files.append( path )
-      else:
-        directories.append( path )
-
-    for afile in files:
-      res = self.__readFile( afile )
+      res = self.__isFile( path )
       if not res['OK']:
-        print 'Error: %s' % res['Message']
-      PFNs = self.__extractPFNs( xml_string )
-      self.fileDict[afile] = PFNs
+        self.failedFiles.append( {res['Message'][0] : res['Message'][1]} )
+        break
+      
+      # if res['Value'] is true then it's a file  
+      if res['Value']:
+        res = self.__readFile( path )
+        if not res['OK']:
+          self.failedFiles[ {path : 'Failed to read xml data.'}]
+        xml_string = res['Value']
+        PFNs = self.__extractPFNs( xml_string )
+        self.fileDict[path] = PFNs
 
     if len(self.fileDict) > 40:
       self.__compareDictWithCatalog()
