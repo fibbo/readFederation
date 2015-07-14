@@ -127,7 +127,7 @@ class catalogAgent( object ):
     tries = 0
     while True and tries < 10:
       try:
-        entries = self.gfal2.listdir( basepath )
+        entries = os.path.listdir( basepath )
         break
       except gfal2.GError, e:
         if e.code == errno.ENOENT:
@@ -145,12 +145,7 @@ class catalogAgent( object ):
       
       # if res['Value'] is true then it's a file  
       if res['Value']:
-        res = self.__readFile( path )
-        if not res['OK']:
-          self.failedFiles[ {path : 'Failed to read xml data.'}]
-        xml_string = res['Value']
-        PFNs = self.__extractPFNs( xml_string )
-        self.fileDict[path] = PFNs
+        pass
 
     if len(self.fileDict) > 40:
       self.__compareDictWithCatalog()
@@ -163,20 +158,7 @@ class catalogAgent( object ):
 
 
   def __isFile( self, path ):
-    tries = 0
-    while True and tries < 10:
-      try:
-        statInfo = self.gfal2.stat( path )
-
-      except gfal2.GError, e:
-        res = S_ERROR( (e.code, e.message) )
-        tries += 1
-        time.sleep(self.sleepTime)
-
-      return S_OK( S_ISREG( statInfo.st_mode ) )
-
-    # if reading file wasn't successful we return the last error
-    return res
+    return S_OK( os.path.isfile( path ) )
 
   def __compareDictWithCatalog( self ):
     """ Poll the filecatalog with the keys in self.fileDict and compare the catalog entries with the values of the fileDict.
