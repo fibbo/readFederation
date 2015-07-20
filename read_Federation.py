@@ -46,66 +46,6 @@ class catalogAgent( object ):
     """
     self.__queueCrawl()
 
-  def __queueCrawl( self ):
-    """
-    Breadth first crawler. Starts at root URL which we add to the queue adds every directory it finds to the queue.
-    Non-recursive method.
-
-    * While queue is not empty:
-      * List directory
-      * For entry in entries if it's a file, read XML and store it to self.fileDict
-      * If it's a directory, add it to the directory_queue
-    """
-    directory_queue = deque([self.rootURL])
-
-    # do this as long as queue is not empty
-    while (len(directory_queue)):
-      # try to list directory
-      entries = []
-      path = directory_queue.popleft()
-
-      # Try to list the directory
-      tries = 0
-      while True and tries < 10:
-        try:
-          import pdb; pdb.set_trace()
-          entries = self.gfal2.listdir( path )
-          break
-        except gfal2.GError, e:
-          if e.code == errno.ENOENT:
-            # path doesn't exist, stop tyring. Should never happen in theory.
-            self.failedDirectories.append( { path : 'Path does not exist'} )
-            break
-          else:
-            # don't spam the server
-            tries += 1
-            time.sleep(self.sleepTime)
-
-      for entry in entries:
-        epath = os.path.join( path, entry )
-        res = self.__isFile( epath )
-        if not res['OK']:
-          self.failedFiles.append( {res['Message'][0] : res['Message'][1]} )
-          break
-        
-        # if res['Value'] is true then it's a file  
-        if res['Value']:
-          res = self.__readFile( epath )
-          if not res['OK']:
-            self.failedFiles[ {epath : 'Failed to read xml data.'}]
-          xml_string = res['Value']
-          PFNs = self.__extractPFNs( xml_string )
-          self.fileDict[epath] = PFNs
-
-        # it's a directory, add it to the queue
-        else:
-          directory_queue.append( epath )
-
-      if len(self.fileDict) > 40:
-        self.__compareDictWithCatalog()
-
-
-
 
   def __crawl( self, basepath ):
     """ Crawler, starts with the first call from the rootURL and goes on from there. 
