@@ -37,6 +37,7 @@ class catalogAgent( object ):
 
     self.failedFiles = []
     self.failedDirectories = []
+    self.failedEntries = []
     self.sleepTime = 4
 
   def execute( self ):
@@ -85,13 +86,15 @@ class catalogAgent( object ):
         epath = os.path.join( path, entry )
         res = self.__isFile( epath )
         if not res['OK']:
-          self.failedFiles.append( {res['Message'][0] : res['Message'][1]} )
+          # might be directory or file thus adding it to failed entries
+          self.failedEntries.append( {res['Message'][0] : res['Message'][1]} )
           break
         
         # if res['Value'] is true then it's a file  
         if res['Value']:
           res = self.__readFile( epath )
           if not res['OK']:
+            # if the readFile failed, put it to failedFiles
             self.failedFiles[ {epath : 'Failed to read xml data.'}]
           xml_string = res['Value']
           PFNs = self.__extractPFNs( xml_string )
