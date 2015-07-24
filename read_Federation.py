@@ -83,8 +83,8 @@ class catalogAgent( object ):
             time.sleep(self.sleepTime)
 
       for entry in entries:
-        epath = os.path.join( path, entry )
-        res = self.__isFile( epath )
+        apath = os.path.join( path, entry )
+        res = self.__isFile( apath )
         if not res['OK']:
           # might be directory or file thus adding it to failed entries
           self.failedEntries.append( {res['Message'][0] : res['Message'][1]} )
@@ -92,17 +92,17 @@ class catalogAgent( object ):
         
         # if res['Value'] is true then it's a file  
         if res['Value']:
-          res = self.__readFile( epath )
+          res = self.__readFile( apath )
           if not res['OK']:
             # if the readFile failed, put it to failedFiles
-            self.failedFiles[ {epath : 'Failed to read xml data.'}]
+            self.failedFiles[ {apath : 'Failed to read xml data.'}]
           xml_string = res['Value']
           PFNs = self.__extractPFNs( xml_string )
-          self.fileDict[epath] = PFNs
+          self.fileDict[apath] = PFNs
 
         # it's a directory, add it to the queue
         else:
-          directory_queue.append( epath )
+          directory_queue.append( apath )
 
       if len(self.fileDict) > 40:
         self.__compareDictWithCatalog()
@@ -110,7 +110,7 @@ class catalogAgent( object ):
 
 
 
-  def __crawl( self, basepath ):
+  def __crawl( self, basapath ):
     """ Crawler, starts with the first call from the rootURL and goes on from there. 
 
     * List all the content of the current directory and stat-call each entry and put files in the files list and directories 
@@ -122,7 +122,7 @@ class catalogAgent( object ):
       this directory again
 
     :param self: self reference
-    :param str basepath: path that we want to the the information from
+    :param str basapath: path that we want to the the information from
     """
 
     directories = []
@@ -130,7 +130,7 @@ class catalogAgent( object ):
     tries = 0
     while True and tries < 10:
       try:
-        entries = self.gfal2.listdir( basepath )
+        entries = self.gfal2.listdir( basapath )
         break
       except gfal2.GError, e:
         if e.code == errno.ENOENT:
@@ -140,7 +140,7 @@ class catalogAgent( object ):
           time.sleep(self.sleepTime)
 
     for entry in entries:
-      path = os.path.join( basepath, entry )
+      path = os.path.join( basapath, entry )
       res = self.__isFile( path )
       if not res['OK']:
         self.failedFiles.append( {res['Message'][0] : res['Message'][1]} )
