@@ -152,6 +152,9 @@ class catalogAgent( object ):
         PFNs = self.__extractPFNs( xml_string )
         self.fileDict[path] = PFNs
 
+      else:
+        directories.append( path )
+
     if len(self.fileDict) > 40:
       self.__compareDictWithCatalog()
 
@@ -169,9 +172,11 @@ class catalogAgent( object ):
         statInfo = self.gfal2.stat( path )
 
       except gfal2.GError, e:
-        res = S_ERROR( (e.code, e.message) )
-        tries += 1
-        time.sleep(self.sleepTime)
+        if e.code == errno.ENOENT:
+          return S_ERROR( 'File does not exist' )
+        else:
+          tries += 1
+          time.sleep(self.sleepTime)
 
       return S_OK( S_ISREG( statInfo.st_mode ) )
 
