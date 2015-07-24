@@ -48,7 +48,7 @@ class catalogAgent( object ):
     self.__queueCrawl()
 
 
-  def __crawl( self, basapath ):
+  def __crawl( self, basepath ):
     """ Crawler, starts with the first call from the rootURL and goes on from there. 
 
     * List all the content of the current directory and stat-call each entry and put files in the files list and directories 
@@ -60,7 +60,7 @@ class catalogAgent( object ):
       this directory again
 
     :param self: self reference
-    :param str basapath: path that we want to the the information from
+    :param str basepath: path that we want to the the information from
     """
 
     directories = []
@@ -68,7 +68,7 @@ class catalogAgent( object ):
     tries = 0
     while True and tries < 10:
       try:
-        entries = self.gfal2.listdir( basapath )
+        entries = self.gfal2.listdir( basepath )
         break
       except gfal2.GError, e:
         if e.code == errno.ENOENT:
@@ -78,7 +78,7 @@ class catalogAgent( object ):
           time.sleep(self.sleepTime)
 
     for entry in entries:
-      path = os.path.join( basapath, entry )
+      path = os.path.join( basepath, entry )
       res = self.__isFile( path )
       if not res['OK']:
         self.failedFiles.append( {res['Message'][0] : res['Message'][1]} )
