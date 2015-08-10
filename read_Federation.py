@@ -34,6 +34,7 @@ class catalogAgent( object ):
     self.rootURL = '/home/phi/dev/UnitTests/Workflow'
     self.fileDict = {}
     self.fc = FileCatalog()
+    self.history = []
 
     self.failedFiles = []
     self.failedDirectories = []
@@ -88,13 +89,16 @@ class catalogAgent( object ):
         print path
 
       else:
-        directories.append( path )
+        directories.append( entry )
 
+    directories.sort(key=lambda x: x.lower())
     if len(self.fileDict) > 40:
       print 'checking catalog'
 
     for directory in directories:
-      self.__crawl( directory )
+      self.history.append( directory )
+      print "History: %s" % self.history
+      self.__crawl( os.path.join( basepath, directory ) )
 
     # add current path to finished list
 
