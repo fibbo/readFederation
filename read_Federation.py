@@ -45,7 +45,7 @@ class catalogAgent( object ):
     Run the crawler
     :param self: self reference
     """
-    self.__queueCrawl()
+    self.__crawl()
 
 
   def __crawl( self, basepath ):
