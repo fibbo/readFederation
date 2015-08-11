@@ -39,7 +39,7 @@ class catalogAgent( object ):
     self.failedFiles = []
     self.failedDirectories = []
     self.sleepTime = 4
-    self.checkPoint = None #['Folders','z','n','u']
+    self.checkPoint = ['Folders','z','n','u']
 
     self.recursionLevel = 0
 
@@ -66,17 +66,15 @@ class catalogAgent( object ):
     :param str basepath: path that we want to the the information from
     """
     print basepath
+    if len(self.checkPoint):
+      self.history = self.checkPoint
+      self.checkPoint = []
+
+    caught_up = self.recursionLevel == len(self.history)
+    if self.recursionLevel == len(self.history):
+      self.history.append( os.path.basename( basepath ) )
     self.recursionLevel += 1
-    # folder_done = False
 
-    # if self.checkPoint:
-    #   self.history = self.checkPoint
-
-    # if len(self.history) > self.recursionLevel:
-    #   self.recursionLevel += 1
-    #   folder_done = True
-    #   self.__crawl( os.path.join(basepath,self.history[self.recursionLevel-1]))
-      
 
     directories = []
     tries = 0
@@ -101,7 +99,8 @@ class catalogAgent( object ):
       
       # if res['Value'] is true then it's a file 
       if res['Value']:
-        print path
+        if caught_up:
+          print path
 
       else:
         directories.append( entry )
@@ -110,20 +109,22 @@ class catalogAgent( object ):
     if len(self.fileDict) > 40:
       print 'checking catalog'
 
-    if not os.path.basename( basepath ) in self.history:
-      self.history.append( os.path.basename( basepath ) )
-
     for directory in directories:
-      self.__crawl( os.path.join( basepath, directory ) )
-      # if len(self.history) > self.recursionLevel:
-      #   if directory > self.history[self.recursionLevel-1]:
-      #     self.__crawl( os.path.join( basepath, directory ) )
-      # else:
-      #   self.__crawl( os.path.join( basepath, directory ) )
+      #self.__crawl( os.path.join( basepath, directory ) )
+      if self.recursionLevel < len(self.history):
+        # we are still catching up, only that last directory and later directories will be scanned
+        # the rest is considered done
+        if directory >= self.history[self.recursionLevel]:
+          self.__crawl( os.path.join( basepath, directory ) )
 
+      # we caught up, all directories will be crawled
+      else:
+          self.__crawl( os.path.join( basepath, directory ) )
+
+    # pop the last entry from the list
+    # and reduce self.recursionLevel
     if len(self.history):
       self.history.pop()
-
     self.recursionLevel -= 1
 
 
