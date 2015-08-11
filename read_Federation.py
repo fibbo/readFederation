@@ -34,22 +34,26 @@ class catalogAgent( object ):
     self.rootURL = 'http://eoslhcb.cern.ch:8443/eos/lhcb/user/p/pgloor'
     self.fileDict = {}
     self.fc = FileCatalog()
+    self.history = []
 
     self.failedFiles = []
     self.failedDirectories = []
     self.failedEntries = []
     self.sleepTime = 4
     self.checkPoint = checkPoint
-    self.history = []
 
     self.recursionLevel = 0
+
+    if checkPoint:
+      self.history = checkPoint
 
   def execute( self ):
     """
     Run the crawler
     :param self: self reference
     """
-    self.__crawl()
+    res = self.__crawl( self.rootURL )
+    return res
 
 
   def __crawl( self, basepath ):
@@ -67,15 +71,13 @@ class catalogAgent( object ):
     :param str basepath: path that we want to the the information from
     """
 
-    if len(self.checkPoint):
-      self.history = self.checkPoint
-      self.checkPoint = []
 
-    caught_up = self.recursionLevel == len(self.history)
     if caught_up:
       self.history.append( os.path.basename( basepath ) )
-
     self.recursionLevel += 1
+
+    caught_up = self.recursionLevel == len(self.history)
+
     directories = []
 
     tries = 0
@@ -110,20 +112,31 @@ class catalogAgent( object ):
       else:
         directories.append( path )
 
+    #sorting the directories so with the checkpoint we know which one have already been checked.
+    directories.sort(key=lambda x: x.lower())
+
     if len(self.fileDict) > 40:
       self.__compareDictWithCatalog()
 
     for directory in directories:
       if self.recursionLevel < len(self.history):
+        # we are still catching up, only the last directory before the crash
+        # and the later directories will be scanned.
         if directory >= self.history[self.recursionLevel]:
           self.__crawl( os.path.join( basepath, directory ) )
       else:
         self.__crawl( os.path.join(basepath, directory ) )
 
+
+    # getting out from the recursion here, pop the last entry from
+    # the list and reduce recursionLevel
     if len(self.history):
       self.history.pop()
 
     self.recursionLevel -= 1
+
+    if self.recursionLevel == 0:
+      return S_OK( self.fileDict )
 
 
   def __isFile( self, path ):
