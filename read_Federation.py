@@ -25,7 +25,7 @@ from stat import S_ISREG, S_ISDIR, S_IXUSR, S_IRUSR, S_IWUSR, \
 
 class catalogAgent( object ):
 
-  def initialize( self ):
+  def initialize( self, checkPoint=None ):
     """
     Setting up the crawler with a gfal2 context, a file catalog handle and an empty file dict
     :param self: self reference
@@ -39,6 +39,10 @@ class catalogAgent( object ):
     self.failedDirectories = []
     self.failedEntries = []
     self.sleepTime = 4
+    self.checkPoint = checkPoint
+    self.history = []
+
+    self.recursionLevel = 0
 
   def execute( self ):
     """
@@ -63,6 +67,15 @@ class catalogAgent( object ):
     :param str basepath: path that we want to the the information from
     """
 
+    if len(self.checkPoint):
+      self.history = self.checkPoint
+      self.checkPoint = []
+
+    caught_up = self.recursionLevel == len(self.history)
+    if caught_up:
+      self.history.append( os.path.basename( basepath ) )
+
+    self.recursionLevel += 1
     directories = []
 
     tries = 0
@@ -86,12 +99,13 @@ class catalogAgent( object ):
       
       # if res['Value'] is true then it's a file  
       if res['Value']:
-        res = self.__readFile( path )
-        if not res['OK']:
-          self.failedFiles[ {path : 'Failed to read xml data.'}]
-        xml_string = res['Value']
-        PFNs = self.__extractPFNs( xml_string )
-        self.fileDict[path] = PFNs
+        if caught_up:
+          res = self.__readFile( path )
+          if not res['OK']:
+            self.failedFiles[ {path : 'Failed to read xml data.'}]
+          xml_string = res['Value']
+          PFNs = self.__extractPFNs( xml_string )
+          self.fileDict[path] = PFNs
 
       else:
         directories.append( path )
@@ -100,10 +114,16 @@ class catalogAgent( object ):
       self.__compareDictWithCatalog()
 
     for directory in directories:
-      self.__crawl( directory )
+      if self.recursionLevel < len(self.history):
+        if directory >= self.history[self.recursionLevel]:
+          self.__crawl( os.path.join( basepath, directory ) )
+      else:
+        self.__crawl( os.path.join(basepath, directory ) )
 
-    # add current path to finished list
+    if len(self.history):
+      self.history.pop()
 
+    self.recursionLevel -= 1
 
 
   def __isFile( self, path ):
