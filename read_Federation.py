@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 import gfal2
 import errno
 import time
+import pdb
 from collections import deque
 
 ##### remove this part once it's integrated as agent #
@@ -15,7 +16,6 @@ parseCommandLine()
 
 
 from DIRAC import gLogger, S_ERROR, S_OK
-import pdb
 
 from DIRAC.Resources.Catalog.FileCatalog       import FileCatalog
 from DIRAC.Core.Base.AgentModule               import AgentModule
@@ -25,13 +25,13 @@ from stat import S_ISREG, S_ISDIR, S_IXUSR, S_IRUSR, S_IWUSR, \
 
 class catalogAgent( object ):
 
-  def initialize( self ):
+  def initialize( self, checkPoint = None ):
     """
     Setting up the crawler with a gfal2 context, a file catalog handle and an empty file dict
     :param self: self reference
     """
     self.gfal2  = gfal2.creat_context()
-    self.rootURL = '/home/phi/dev/UnitTests/Workflow'
+    self.rootURL = '/home/phi/dev/crawling/src/Folders'
     self.fileDict = {}
     self.fc = FileCatalog()
     self.history = []
@@ -39,6 +39,9 @@ class catalogAgent( object ):
     self.failedFiles = []
     self.failedDirectories = []
     self.sleepTime = 4
+    self.checkPoint = None #['Folders','z','n','u']
+
+    self.recursionLevel = 0
 
   def execute( self ):
     """
@@ -63,8 +66,19 @@ class catalogAgent( object ):
     :param str basepath: path that we want to the the information from
     """
     print basepath
-    directories = []
+    self.recursionLevel += 1
+    # folder_done = False
 
+    # if self.checkPoint:
+    #   self.history = self.checkPoint
+
+    # if len(self.history) > self.recursionLevel:
+    #   self.recursionLevel += 1
+    #   folder_done = True
+    #   self.__crawl( os.path.join(basepath,self.history[self.recursionLevel-1]))
+      
+
+    directories = []
     tries = 0
     while True and tries < 10:
       try:
@@ -77,6 +91,7 @@ class catalogAgent( object ):
           tries += 1
           time.sleep(self.sleepTime)
 
+
     for entry in entries:
       path = os.path.join( basepath, entry )
       res = self.__isFile( path )
@@ -84,7 +99,7 @@ class catalogAgent( object ):
         self.failedFiles.append( {res['Message'][0] : res['Message'][1]} )
         break
       
-      # if res['Value'] is true then it's a file  
+      # if res['Value'] is true then it's a file 
       if res['Value']:
         print path
 
@@ -95,13 +110,21 @@ class catalogAgent( object ):
     if len(self.fileDict) > 40:
       print 'checking catalog'
 
+    if not os.path.basename( basepath ) in self.history:
+      self.history.append( os.path.basename( basepath ) )
+
     for directory in directories:
-      self.history.append( directory )
-      print "History: %s" % self.history
       self.__crawl( os.path.join( basepath, directory ) )
+      # if len(self.history) > self.recursionLevel:
+      #   if directory > self.history[self.recursionLevel-1]:
+      #     self.__crawl( os.path.join( basepath, directory ) )
+      # else:
+      #   self.__crawl( os.path.join( basepath, directory ) )
 
-    # add current path to finished list
+    if len(self.history):
+      self.history.pop()
 
+    self.recursionLevel -= 1
 
 
   def __isFile( self, path ):
