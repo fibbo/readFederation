@@ -39,16 +39,19 @@ class catalogAgent( object ):
     self.failedFiles = []
     self.failedDirectories = []
     self.sleepTime = 4
-    self.checkPoint = [] # ['Folders','z','n','u']
 
     self.recursionLevel = 0
+
+    if checkPoint:
+      self.history = checkPoint
 
   def execute( self ):
     """
     Run the crawler
     :param self: self reference
     """
-    self.__crawl( self.rootURL )
+    res = self.__crawl( self.rootURL )
+    return res
 
 
   def __crawl( self, basepath ):
@@ -65,15 +68,13 @@ class catalogAgent( object ):
     :param self: self reference
     :param str basepath: path that we want to the the information from
     """
-    print basepath
-    if len(self.checkPoint):
-      self.history = self.checkPoint
-      self.checkPoint = []
 
-    caught_up = self.recursionLevel == len(self.history)
+    
     if self.recursionLevel == len(self.history):
       self.history.append( os.path.basename( basepath ) )
     self.recursionLevel += 1
+
+    caught_up = self.recursionLevel == len(self.history)
 
 
     directories = []
@@ -101,7 +102,7 @@ class catalogAgent( object ):
       if res['Value']:
         #
         if caught_up:
-          print path
+          self.fileDict[path] = 'pfn'
 
       else:
         directories.append( entry )
@@ -127,6 +128,9 @@ class catalogAgent( object ):
     if len(self.history):
       self.history.pop()
     self.recursionLevel -= 1
+
+    if self.recursionLevel == 0:
+      return self.fileDict
 
 
   def __isFile( self, path ):
