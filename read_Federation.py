@@ -39,7 +39,7 @@ class catalogAgent( object ):
     self.failedFiles = []
     self.failedDirectories = []
     self.sleepTime = 4
-    self.checkPoint = ['Folders','z','n','u']
+    self.checkPoint = [] # ['Folders','z','n','u']
 
     self.recursionLevel = 0
 
@@ -99,6 +99,7 @@ class catalogAgent( object ):
       
       # if res['Value'] is true then it's a file 
       if res['Value']:
+        #
         if caught_up:
           print path
 
@@ -112,8 +113,8 @@ class catalogAgent( object ):
     for directory in directories:
       #self.__crawl( os.path.join( basepath, directory ) )
       if self.recursionLevel < len(self.history):
-        # we are still catching up, only that last directory and later directories will be scanned
-        # the rest is considered done
+        # we are still catching up, only that last directory before the crash and later directories
+        # will be scanned, the rest is considered done
         if directory >= self.history[self.recursionLevel]:
           self.__crawl( os.path.join( basepath, directory ) )
 
@@ -132,8 +133,8 @@ class catalogAgent( object ):
     return S_OK( os.path.isfile( path ) )
 
   def __compareDictWithCatalog( self ):
-    """ Poll the filecatalog with the keys in self.fileDict and compare the catalog entries with the values of the fileDict.
-    Once checked, remove the entry from the dictionary.
+    """ Poll the filecatalog with the keys in self.fileDict and compare the catalog entries with the values
+        of the fileDict. Once checked, remove the entry from the dictionary.
     :param self: self reference
     :return failed dict { 'NiC' : pfns not in catalog, 'NiS' : pfns in catalog but not storage}
     """
