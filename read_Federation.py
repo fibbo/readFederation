@@ -72,7 +72,7 @@ class catalogAgent( object ):
     """
 
 
-    if caught_up:
+    if self.recursionLevel == len(self.history):
       self.history.append( os.path.basename( basepath ) )
     self.recursionLevel += 1
 
