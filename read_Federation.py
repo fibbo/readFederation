@@ -17,35 +17,43 @@ parseCommandLine()
 from DIRAC import gLogger, S_ERROR, S_OK
 import pdb
 
-from DIRAC.Resources.Catalog.FileCatalog       import FileCatalog
-from DIRAC.Core.Base.AgentModule               import AgentModule
+from DIRAC.Resources.Catalog.FileCatalog            import FileCatalog
+from DIRAC.Resources.Storage.StorageElement         import StorageElement
+from DIRAC.Core.Base.AgentModule                    import AgentModule
+from DIRAC.Core.Utilities.Pfn                       import pfnparse, pfnunparse
+from LHCbDIRAC.DataManagementSystem.Client.DMScript import DMScript
 
 from stat import S_ISREG, S_ISDIR, S_IXUSR, S_IRUSR, S_IWUSR, \
   S_IRWXG, S_IRWXU, S_IRWXO
 
+
 class catalogAgent( object ):
 
-  def initialize( self, checkPoint=None ):
+  def initialize( self ):
     """
     Setting up the crawler with a gfal2 context, a file catalog handle and an empty file dict
     :param self: self reference
     """
+
+    self.log = gLogger.getSubLogger( "readFederation", True )
     self.gfal2  = gfal2.creat_context()
-    self.rootURL = 'http://eoslhcb.cern.ch:8443/eos/lhcb/user/p/pgloor'
+    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/BHADRON.DST/00010920/0000/'
     self.fileDict = {}
-    self.fc = FileCatalog()
     self.history = []
 
     self.failedFiles = []
     self.failedDirectories = []
     self.failedEntries = []
     self.sleepTime = 4
-    self.checkPoint = checkPoint
+    #self.checkPoint = checkPoint
 
     self.recursionLevel = 0
+    self.max_tries = 10
 
-    if checkPoint:
-      self.history = checkPoint
+    # check if there is a checkpoint file, if yes read it as last history
+    if os.path.isfile('checkpoint.txt'):
+      with open('checkpoint.txt') as f:
+        self.history = f.read().splitlines()
 
   def execute( self ):
     """
@@ -74,14 +82,17 @@ class catalogAgent( object ):
 
     if self.recursionLevel == len(self.history):
       self.history.append( os.path.basename( basepath ) )
+
+      # write the last path we visited into 'checkpoint.txt'
+      self.__writeCheckPoint()
     self.recursionLevel += 1
 
     caught_up = self.recursionLevel == len(self.history)
 
     directories = []
-
+    entries = []
     tries = 0
-    while True and tries < 10:
+    while True and tries < self.max_tries:
       try:
         entries = self.gfal2.listdir( basepath )
         break
@@ -97,7 +108,7 @@ class catalogAgent( object ):
       res = self.__isFile( path )
       if not res['OK']:
         self.failedFiles.append( {res['Message'][0] : res['Message'][1]} )
-        break
+        continue
       
       # if res['Value'] is true then it's a file  
       if res['Value']:
@@ -108,9 +119,12 @@ class catalogAgent( object ):
           xml_string = res['Value']
           PFNs = self.__extractPFNs( xml_string )
           self.fileDict[path] = PFNs
+          #only for debugging the compareDictWithCatalog method, remove following line
+          # when done
+          self.__compareDictWithCatalog()
 
       else:
-        directories.append( path )
+        directories.append( entry )
 
     #sorting the directories so with the checkpoint we know which one have already been checked.
     directories.sort(key=lambda x: x.lower())
@@ -136,12 +150,23 @@ class catalogAgent( object ):
     self.recursionLevel -= 1
 
     if self.recursionLevel == 0:
+      self.__compareDictWithCatalog()
+      try:
+        os.remove('checkpoint.txt')
+      except Exception, e:
+        self.log.error("readFederation: Failed to remove checkpoint")
       return S_OK( self.fileDict )
 
+  def __writeCheckPoint( self ):
+    f = open('checkpoint.txt', 'w')
+    for entry in self.history:
+      f.write(entry+'\n')
+    f.close()
 
   def __isFile( self, path ):
+    self.log.debug("readFederation: Checking if %s is a file or not" % path)
     tries = 0
-    while True and tries < 10:
+    while True and tries < self.max_tries:
       try:
         statInfo = self.gfal2.stat( path )
 
@@ -150,12 +175,11 @@ class catalogAgent( object ):
           return S_ERROR( 'File does not exist' )
         else:
           tries += 1
+          self.log.debug("readFederation: Failed to check file: (%s,%s), trying again." % (e.code, e.message))
           time.sleep(self.sleepTime)
-
       return S_OK( S_ISREG( statInfo.st_mode ) )
 
-    # if reading file wasn't successful we return the last error
-    return res
+    return S_ERROR( "Couldn't check path, stopped trying after %s tries" % self.max_tries )
 
   def __compareDictWithCatalog( self ):
     """ Poll the filecatalog with the keys in self.fileDict and compare the catalog entries with the values of the fileDict.
@@ -163,15 +187,67 @@ class catalogAgent( object ):
     :param self: self reference
     :return failed dict { 'NiC' : pfns not in catalog, 'NiS' : pfns in catalog but not storage}
     """
+    self.log.debug("readFederation: gathered more than 40 file links: comparing with catalog now")
     failed = {}
     successful = {}
+    dmScript = DMScript()
+    fc = FileCatalog()
+    pdb.set_trace()
+    for fed_path in self.fileDict:
+      self.log.debug("readFederation: Retrieving LFNs for %s" % fed_path)
+      urlList = self.fileDict[fed_path]
+      lfn = dmScript.getLFNsFromList( urlList )
+      if len(lfn) == 1:
+        lfn = lfn[0]
+      res = fc.getReplicas(lfn)
+      if res['OK']:
+        res = res['Value']['Successful']
+        SEDict = {}
+        for SE, PFN in res.iteritems():
+          SEDict[SE] = PFN
 
-    for afile, pfnlist in self.fileDict.items():
-      res = fc.getReplicas( afile )
-      if not res['OK']:
-        pass
+        SE_TUrls = []
+        for SE in SEDict[lfn].keys():
+          #for each SE that has the file according to FC we get the TURL
+          #if that TURL
+          
+          se = StorageElement( SE, protocols="srm")
+          res = se.getURL(lfn, protocol='http')
+          if res['OK']:
+            res = res['Value']['Successful']
+            if any( res in url for res in res.values() for url in urls):
+              successful[lfn] = url
+              urls.remove(url)
+            else:
+              failed[lfn] = url
+      else:
+        res = res['Message']
+        failed[lfn] = res
 
-    pass
+    self.fileDict = {}
+
+    return S_OK( { 'Successful' : successful, 'Failed' : failed } )
+
+  def __compareURLS( self, fc_url, fed_url ):
+    """ This method compares URLs, but should also consider, that maybe one URL doesn't have a port specified while the other has
+    It is assumed that both URLs at least have protocol, host, path and filename defined.
+
+    """
+    fc_res = pfnparse(fc_url)['Value']
+    fed_res = pfnparse(fc_url)['Value']
+    key_list = ['Path', 'Filename', 'Port', 'Protocol', 'Host', 'WSUrl']
+    isAMatch = True
+    for key in key_list:
+      fc_value = fc_res.get(key)
+      fed_value = fed_res.get(key)
+        # both keys have to exist and if their values are not the same then the url is not the same either
+        if fc_value and fed_value:  
+          if not fc_value == fed_value:
+            isAMatch = False
+            break
+
+    return isAMatch
+
 
 
   def __readFile( self, afile ):
@@ -185,17 +261,21 @@ class catalogAgent( object ):
     # open the file
     afile = afile+'?metalink'
     tries = 0
-    while True and tries < 10:
+    successful = False
+    while True and tries < self.max_tries:
       try:
         f = self.gfal2.open(afile, 'r')
+        successful = True
         break
       except gfal2.GError, e:
         if e.code == errno.ENOENT:
           return S_ERROR( 'File does not exist' )
         else:
           tries += 1
+          self.log.debug("readFederation: Failed to read file: (%s,%s), trying again." % (e.code, e.message))
           time.sleep(self.sleepTime)
-    
+    if not successful:
+      return S_ERROR("readFederation: Failed to read file (%s,%s)" % (e.code, e.message))
     content = f.read(10000)
     xml_string = content
     return S_OK( xml_string )
@@ -222,6 +302,7 @@ class catalogAgent( object ):
 
 if __name__ == '__main__':  
   CA = catalogAgent()
+  gLogger.setLevel("DEBUG")
   CA.initialize()
   CA.execute()
   #print CA._catalogAgent__readFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/062426_0000000001.raw' )
