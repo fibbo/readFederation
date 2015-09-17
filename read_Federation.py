@@ -214,8 +214,10 @@ class catalogAgent( object ):
               if self.__compareURLS(tURL, url):
                 successful[lfn] = True
                 urlList.remove( url )
-              else:
-                failed[lfn] = url
+        # urls remaining in urlList are PFNs from the federation that couldn't be matched with any of the replica SEs
+        # so the catalog doesn't know about them
+        for url in urlList:
+          failed[lfn] = url
 
       else:
         # failed to get replicas
