@@ -5,7 +5,6 @@ import xml.etree.ElementTree as ET
 import gfal2
 import errno
 import time
-from collections import deque
 
 ##### remove this part once it's integrated as agent #
 from DIRAC.Core.Base.Script import parseCommandLine
@@ -15,6 +14,7 @@ parseCommandLine()
 
 
 from DIRAC import gLogger, S_ERROR, S_OK
+
 import pdb
 
 from DIRAC.Resources.Catalog.FileCatalog            import FileCatalog
@@ -130,7 +130,10 @@ class catalogAgent( object ):
     directories.sort(key=lambda x: x.lower())
 
     if len(self.fileDict) > 40:
-      self.__compareDictWithCatalog()
+      res = self.__compareDictWithCatalog()
+      if res['OK']:
+        res = res['Value']
+        print res['Failed']
 
     for directory in directories:
       if self.recursionLevel < len(self.history):
@@ -193,34 +196,27 @@ class catalogAgent( object ):
     dmScript = DMScript()
     fc = FileCatalog()
     pdb.set_trace()
-    for fed_path in self.fileDict:
+    for urlList in self.fileDict.values():
       self.log.debug("readFederation: Retrieving LFNs for %s" % fed_path)
-      urlList = self.fileDict[fed_path]
       lfn = dmScript.getLFNsFromList( urlList )
-      if len(lfn) == 1:
-        lfn = lfn[0]
+
       res = fc.getReplicas(lfn)
       if res['OK']:
-        res = res['Value']['Successful']
-        SEDict = {}
-        for SE, PFN in res.iteritems():
-          SEDict[SE] = PFN
-
-        SE_TUrls = []
-        for SE in SEDict[lfn].keys():
-          #for each SE that has the file according to FC we get the TURL
-          #if that TURL
-          
-          se = StorageElement( SE, protocols="srm")
+        SEList = res['Value']['Successful'].keys()
+        for SE in SEList:
+          se = StorageElement( SE, protocols='http')
           res = se.getURL(lfn, protocol='http')
           if res['OK']:
-            res = res['Value']['Successful']
-            if any( res in url for res in res.values() for url in urls):
-              successful[lfn] = url
-              urls.remove(url)
-            else:
-              failed[lfn] = url
+            tURL = res['Value']['Successful'].values()
+            for url in urlList:
+              if self.__compareURLS(tURL, url):
+                successful[lfn] = True
+                urlList.remove( url )
+              else:
+                failed[lfn] = url
+
       else:
+        # failed to get replicas
         res = res['Message']
         failed[lfn] = res
 
@@ -276,8 +272,7 @@ class catalogAgent( object ):
           time.sleep(self.sleepTime)
     if not successful:
       return S_ERROR("readFederation: Failed to read file (%s,%s)" % (e.code, e.message))
-    content = f.read(10000)
-    xml_string = content
+    xml_string = f.read(10000)
     return S_OK( xml_string )
 
 
