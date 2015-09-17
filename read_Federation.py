@@ -151,16 +151,17 @@ class catalogAgent( object ):
       self.history.pop()
 
     self.recursionLevel -= 1
-
+    self.log.debug( "readFederation.__crawl: Current recursion level: %s" % self.recursionLevel )
     if self.recursionLevel == 0:
       self.__compareDictWithCatalog()
       try:
         os.remove('checkpoint.txt')
       except Exception, e:
-        self.log.error("readFederation: Failed to remove checkpoint")
+        self.log.error("readFederation.__crawl: Failed to remove checkpoint")
       return S_OK( self.fileDict )
 
   def __writeCheckPoint( self ):
+    self.log.debug("readFederation.__writeCheckPoint: Updating checkpoint")
     f = open('checkpoint.txt', 'w')
     for entry in self.history:
       f.write(entry+'\n')
@@ -197,12 +198,13 @@ class catalogAgent( object ):
     fc = FileCatalog()
     pdb.set_trace()
     for urlList in self.fileDict.values():
-      self.log.debug("readFederation: Retrieving LFNs for %s" % fed_path)
+      self.log.debug("readFederation: Retrieving LFN for %s" % fed_path)
       lfn = dmScript.getLFNsFromList( urlList )
 
       res = fc.getReplicas(lfn)
       if res['OK']:
         SEList = res['Value']['Successful'].keys()
+        self.log.debug("readFederation.__compareDictWithCatalog: Retrieving TURL for each SE and check whether we have a match with the federation PFN")
         for SE in SEList:
           se = StorageElement( SE, protocols='http')
           res = se.getURL(lfn, protocol='http')
@@ -229,6 +231,7 @@ class catalogAgent( object ):
     It is assumed that both URLs at least have protocol, host, path and filename defined.
 
     """
+    self.log.debug("readFederation.__compareURLS: comparing TURL from SE with TURL from federation")
     fc_res = pfnparse(fc_url)['Value']
     fed_res = pfnparse(fc_url)['Value']
     key_list = ['Path', 'Filename', 'Port', 'Protocol', 'Host', 'WSUrl']
