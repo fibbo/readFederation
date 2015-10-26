@@ -196,33 +196,41 @@ class catalogAgent( object ):
     successful = {}
     dmScript = DMScript()
     fc = FileCatalog()
-    pdb.set_trace()
+    SEDict = {}
     for urlList in self.fileDict.values():
-      self.log.debug("readFederation: Retrieving LFN for %s" % fed_path)
+      self.log.debug("readFederation: Retrieving LFN for %s" % urlList)
       lfn = dmScript.getLFNsFromList( urlList )
-
-      res = fc.getReplicas(lfn)
-      if res['OK']:
-        SEList = res['Value']['Successful'].keys()
-        self.log.debug("readFederation.__compareDictWithCatalog: Retrieving TURL for each SE and check whether we have a match with the federation PFN")
-        for SE in SEList:
-          se = StorageElement( SE, protocols='http')
-          res = se.getURL(lfn, protocol='http')
-          if res['OK']:
-            tURL = res['Value']['Successful'].values()
-            for url in urlList:
-              if self.__compareURLS(tURL, url):
-                successful[lfn] = True
-                urlList.remove( url )
-        # urls remaining in urlList are PFNs from the federation that couldn't be matched with any of the replica SEs
-        # so the catalog doesn't know about them
+      if len(lfn):
+        lfn = lfn[0]
+        res = fc.getReplicas(lfn)
+        if not res['OK']:
+          res = res['Message']
+          failed[lfn] = res
+        else:
+          res = res['Value']
+          if lfn in res['Successful']:
+            SEList = res['Successful'][lfn].keys()
+            self.log.debug("readFederation.__compareDictWithCatalog: Retrieving TURL for each SE and check whether we have a match with the federation PFN")
+            for SE in SEList:
+              se = SEDict.get( SE, None )
+              if not se:
+                SEDict[SE] = StorageElement( SE, protocols='GFAL2_HTTP')
+                se = SEDict[SE]
+              res = se.getURL(lfn, protocol='http')
+              if res['OK']:
+                tURL = res['Value']['Successful'].values()
+                # urlList holds all the urls that we need to check if they are also in the catalog so we compare if 
+                # any of the url from urlList is the same
+                for url in urlList:
+                  if self.__compareURLS(tURL, url):
+                    successful[lfn] = True
+                    urlList.remove( url )
+          # urls remaining in urlList are PFNs from the federation that couldn't be matched with any of the replica SEs
+          # so the catalog doesn't know about them
         for url in urlList:
           failed[lfn] = url
 
-      else:
-        # failed to get replicas
-        res = res['Message']
-        failed[lfn] = res
+          
 
     self.fileDict = {}
 
@@ -234,18 +242,18 @@ class catalogAgent( object ):
 
     """
     self.log.debug("readFederation.__compareURLS: comparing TURL from SE with TURL from federation")
-    fc_res = pfnparse(fc_url)['Value']
-    fed_res = pfnparse(fc_url)['Value']
+    fc_res = pfnparse(fc_url[0])['Value']
+    fed_res = pfnparse(fed_url)['Value']
     key_list = ['Path', 'Filename', 'Port', 'Protocol', 'Host', 'WSUrl']
     isAMatch = True
     for key in key_list:
       fc_value = fc_res.get(key)
       fed_value = fed_res.get(key)
         # both keys have to exist and if their values are not the same then the url is not the same either
-        if fc_value and fed_value:  
-          if not fc_value == fed_value:
-            isAMatch = False
-            break
+      if fc_value and fed_value:  
+        if not fc_value == fed_value:
+          isAMatch = False
+          break
 
     return isAMatch
 
