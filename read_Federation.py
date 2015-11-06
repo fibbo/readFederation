@@ -74,9 +74,9 @@ class catalogAgent( object ):
 
     * List all the content of the current directory and stat-call each entry and put files in the files list and directories 
       in the directories list. 
-    * For all files retrieve the XML data and extract the PFNs and add them to the fileDict.
-    * Once all file PFNs have been extracted and the fileDict is still small enough, go a directory deeper
-    * If the fileDict is big enough, compare each file with the file catalog
+    * For all files retrieve the XML data and extract the PFNs and add them to the fileList.
+    * Once all file PFNs have been extracted and the fileList is still small enough, go a directory deeper
+    * If the fileList is big enough, compare each file with the file catalog
     * Possible: Once we leave a directory, add the path to a file so in case the crawler crashes, we won't check
       this directory again
 
@@ -191,6 +191,15 @@ class catalogAgent( object ):
     return S_OK( entries )
 
   def __writeCheckPoint( self ):
+    """ Write down the folders we are visting to the checkpoint.txt file. So if we are in /A/B/C the checkpoint looks like this:
+    A
+    B
+    C
+
+    :param self: self reference
+    :returns nothing
+
+    """
     self.log.debug("readFederation.__writeCheckPoint: Updating checkpoint")
     f = open('checkpoint.txt', 'w')
     for entry in self.history:
@@ -198,6 +207,15 @@ class catalogAgent( object ):
     f.close()
 
   def __isFile( self, path ):
+    """ stat the file and check if the path is a file or not
+
+    :param self: self reference
+    :param str path: path to be checked
+    :returns S_OK( bool ) whether the path is a file or not
+             S_ERROR( errMsg ) if either the file doesn't exist or for another reason stating fails
+
+
+    """
     # self.log.debug("readFederation: Checking if %s is a file or not" % path)
     tries = 0
     while True and tries < self.max_tries:
@@ -216,10 +234,21 @@ class catalogAgent( object ):
     return S_ERROR( "Couldn't check path, stopped trying after %s tries" % self.max_tries )
 
   def __compareDictWithCatalog( self ):
-    """ Poll the filecatalog with the keys in self.fileDict and compare the catalog entries with the values of the fileDict.
-    Once checked, remove the entry from the dictionary.
+    """ At this point we need to check for all the entries in the self.fileList if they are also in the catalog or not. The self.fileList
+    represents the state on the storages and the catalog needs to match that.
+    Depending on the number of replicas each entry in the fileList has one or more entries. For each sublist in fileList we generate the LFN.
+    With that LFN we poll the catalog to find out what the catalog knows about this file. From that information we extract the SE where the
+    catalog thinks the files are stored on.
+    For each SE we intialize a StorageElement object which we save in a dict so if we need to use that particular SE more than once we don't
+    initialize over and over again.
+    Then for each SE we get the transport URL and check if one of the entries from urlList (which itself is an entry from self.fileList) matches
+    with the transport URL from the SE then the catalog knows about that file which is good. In any case the entry is removed from the urlList
+    and either put to the successful or failed dict.
+    If we fail to instantiate a SE all the transportURL queries will fail so we put those LFNs that poll that SE also in the failed with that
+    message.
+
     :param self: self reference
-    :return failed dict { 'NiC' : pfns not in catalog, 'NiS' : pfns in catalog but not storage}
+    :returns nothing
     """
   
     self.log.debug("readFederation: gathered more than 40 file links: comparing with catalog now")
@@ -230,7 +259,7 @@ class catalogAgent( object ):
     SEDict = {}
     # TODO: make sure that this part works as intended - if storage element couldn't be initiated this needs to be
     # noted in the failed message.
-    # make this thing more efficient - retrieve LFN
+    # make this thing more efficient - maybe it would be better if we retrieved all LFNs for all the entries in the fileList at once
     for urlList in self.fileList:
       self.log.debug("readFederation: Retrieving LFN for %s" % urlList)
       lfn = dmScript.getLFNsFromList( urlList )
@@ -244,7 +273,8 @@ class catalogAgent( object ):
           res = res['Value']
           if lfn in res['Successful']:
             SEList = res['Successful'][lfn].keys()
-            self.log.debug("readFederation.__compareDictWithCatalog: Retrieving TURL for each SE and check whether we have a match with the federation PFN")
+            self.log.debug("readFederation.__compareDictWithCatalog: Retrieving TURL for each SE and check whether we have a match with the\
+              federation PFN")
             for SE in SEList:
               se = SEDict.get( SE, None )
               if not se:
@@ -252,7 +282,7 @@ class catalogAgent( object ):
                 se = SEDict[SE]
               res = se.getURL(lfn, protocol='http')
               if res['OK']:
-                tURL = res['Value']['Successful'].values()
+                tURL = res['Value']['Successful'].values()[0]
                 # url holds all the urls that we need to check if they are also in the catalog so we compare if 
                 # any of the url from url is the same
                 while len(urlList):
@@ -273,6 +303,8 @@ class catalogAgent( object ):
     """ This method compares URLs, but should also consider, that maybe one URL doesn't have a port specified while the other has
     It is assumed that both URLs at least have protocol, host, path and filename defined.
 
+    :param self: self reference
+    :param list fc_url: 
     """
     self.log.debug("readFederation.__compareURLS: comparing TURL from SE with TURL from federation")
     fc_res = pfnparse(fc_url[0])['Value']
@@ -300,7 +332,8 @@ class catalogAgent( object ):
 
         :param self: self reference
         :param str filename: name of the metalink file to read
-        :return str xml_string: a string containing the xml information of file
+        :return S_OK( xml_string ): a string containing the xml information of file
+                S_ERROR( errMsg ): if the file doesn't exist or it failed to read it.
     """
     # open the file
     afile = afile+'?metalink'
