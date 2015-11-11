@@ -118,6 +118,7 @@ class catalogAgent( object ):
         xml_string = res['Value']
         PFNs = self.__extractPFNs( xml_string )
         self.fileList.append(PFNs)
+        
         #only for debugging the compareDictWithCatalog method, remove following line
         # when done
         #self.__compareDictWithCatalog()
@@ -307,7 +308,7 @@ class catalogAgent( object ):
     :param list fc_url: 
     """
     self.log.debug("readFederation.__compareURLS: comparing TURL from SE with TURL from federation")
-    fc_res = pfnparse(fc_url[0])['Value']
+    fc_res = pfnparse(fc_url)['Value']
     fed_res = pfnparse(fed_url)['Value']
     key_list = ['Path', 'Filename', 'Port', 'Protocol', 'Host', 'WSUrl']
     isAMatch = True
