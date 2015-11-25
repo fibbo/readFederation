@@ -204,7 +204,12 @@ class catalogAgent( object ):
     self.log.debug("readFederation.__writeCheckPoint: Updating checkpoint")
     f = open('checkpoint.txt', 'w')
     for entry in self.history:
-      f.write(entry+'\n')
+      try:
+        f.write(entry+'\n')
+      except Exception, e:
+        self.log.debug("readFederation.__writeCheckPoint: Something went wrong while writing to the checkpoint file: [%d]: %s" % \
+                                                                                                              (e.code, e.message))
+  
     f.close()
 
   def __isFile( self, path ):
