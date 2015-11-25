@@ -114,11 +114,11 @@ class catalogAgent( object ):
       if res['Value'] and caught_up:
         res = self.__readFile( path )
         if not res['OK']:
-          self.failedFiles[ {path : 'Failed to read xml data.'}]
+          self.failedFiles[ {path : res['Message'] } ]
         xml_string = res['Value']
         PFNs = self.__extractPFNs( xml_string )
         self.fileList.append(PFNs)
-        
+
         #only for debugging the compareDictWithCatalog method, remove following line
         # when done
         #self.__compareDictWithCatalog()
@@ -266,6 +266,7 @@ class catalogAgent( object ):
       lfn = dmScript.getLFNsFromList( urlList )
       if len(lfn):
         lfn = lfn[0]
+        print lfn
         res = fc.getReplicas(lfn)
         if not res['OK']:
           res = res['Message']
@@ -274,8 +275,6 @@ class catalogAgent( object ):
           res = res['Value']
           if lfn in res['Successful']:
             SEList = res['Successful'][lfn].keys()
-            self.log.debug("readFederation.__compareDictWithCatalog: Retrieving TURL for each SE and check whether we have a match with the\
-              federation PFN")
             for SE in SEList:
               se = SEDict.get( SE, None )
               if not se:
@@ -294,7 +293,7 @@ class catalogAgent( object ):
                     failed[lfn] = {url : 'Failed to find match in catalog'}
               else:
               # couldn't get transport URL (for example if the se wasn't properly instantiated)
-                failed[lfn] = {SE : res['Message']}
+                failed[lfn] = {SE : (res['Message'], urlList)}
 
     self.fileList = []
 
@@ -354,7 +353,11 @@ class catalogAgent( object ):
           time.sleep(self.sleepTime)
     if not successful:
       return S_ERROR("readFederation: Failed to read file (%s,%s)" % (e.code, e.message))
-    xml_string = f.read(10000)
+    try:
+      xml_string = f.read(10000)
+    except Exception, e:
+      self.log.debug("readFederation.__readFile: Failed to read file.")
+      return S_ERROR("Wasn't able to read file: [%d]: %s" % (e.code, e.message))
     return S_OK( xml_string )
 
 
