@@ -177,10 +177,10 @@ class catalogAgent( object ):
     self.log.debug("readFederation.__listDirectory: Listing the current directory: %s" % path)
     entries = []
     tries = 0
-    while True and tries < self.max_tries:
+    while tries < self.max_tries:
       try:
         entries = self.gfal2.listdir( path )
-        break
+        return S_OK( entries )
       except gfal2.GError, e:
         if e.code == errno.ENOENT:
           return S_ERROR( 'readFederation.__listDirectory: Path %s doesnt exist' % path )
@@ -188,8 +188,9 @@ class catalogAgent( object ):
           self.log.debug('readFederation.__listDirectory: Failed to list directory [%d]: %s. Waiting %s seconds' % (e.code, e.message, self.sleepTime))
           tries += 1
           time.sleep(self.sleepTime)
+    return S_ERROR( 'readFederation.__listDirectory: Failed to list directory [%d]: %s.' % (e.code, e.message) )
 
-    return S_OK( entries )
+    
 
   def __writeCheckPoint( self ):
     """ Write down the folders we are visting to the checkpoint.txt file. So if we are in /A/B/C the checkpoint looks like this:
@@ -209,7 +210,6 @@ class catalogAgent( object ):
       except Exception, e:
         self.log.debug("readFederation.__writeCheckPoint: Something went wrong while writing to the checkpoint file: [%d]: %s" % \
                                                                                                               (e.code, e.message))
-  
     f.close()
 
   def __isFile( self, path ):
@@ -224,18 +224,20 @@ class catalogAgent( object ):
     """
     # self.log.debug("readFederation: Checking if %s is a file or not" % path)
     tries = 0
-    while True and tries < self.max_tries:
+    while tries < self.max_tries:
       try:
         statInfo = self.gfal2.stat( path )
-
+        return S_OK( S_ISREG( statInfo.st_mode ) )
       except gfal2.GError, e:
         if e.code == errno.ENOENT:
-          return S_ERROR( 'File does not exist' )
+          errMsg = "readFederation.__isFile: File does not exist."
+          self.log.debug("readFederation.__isFile: File does not exist")
+          return S_ERROR( errMsg )
         else:
           tries += 1
           self.log.debug("readFederation: Failed to check file: (%s,%s), trying again." % (e.code, e.message))
           time.sleep(self.sleepTime)
-      return S_OK( S_ISREG( statInfo.st_mode ) )
+      
 
     return S_ERROR( "Couldn't check path, stopped trying after %s tries" % self.max_tries )
 
@@ -344,7 +346,7 @@ class catalogAgent( object ):
     afile = afile+'?metalink'
     tries = 0
     successful = False
-    while True and tries < self.max_tries:
+    while tries < self.max_tries:
       try:
         f = self.gfal2.open(afile, 'r')
         successful = True
