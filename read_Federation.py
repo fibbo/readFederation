@@ -209,7 +209,6 @@ class catalogAgent( object ):
       except Exception, e:
         self.log.debug("readFederation.__writeCheckPoint: Something went wrong while writing to the checkpoint file: [%d]: %s" % \
                                                                                                               (e.code, e.message))
-  
     f.close()
 
   def __isFile( self, path ):
