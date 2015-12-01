@@ -37,7 +37,7 @@ class catalogAgent( object ):
 
     self.log = gLogger.getSubLogger( "readFederation", True )
     self.gfal2  = gfal2.creat_context()
-    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/BHADRON.DST/00010920/0000'
+    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision15/BHADRON.MDST/00047850/0001/'
     self.fileList = []
     self.history = []
 
@@ -46,9 +46,9 @@ class catalogAgent( object ):
     self.failedEntries = []
 
     #if a gfal2 operation fails for other reasons than NOEXIST we try again in 4 seconds
-    self.sleepTime = 4
+    self.sleepTime = 0
     #maximum number of tries that gfal2 takes to get information form a server
-    self.max_tries = 10
+    self.max_tries = 1
 
     self.recursionLevel = 0
 
@@ -227,11 +227,16 @@ class catalogAgent( object ):
     while tries < self.max_tries:
       try:
         statInfo = self.gfal2.stat( path )
+        self.log.debug("readFederation.__isFile: stating worked")
         return S_OK( S_ISREG( statInfo.st_mode ) )
       except gfal2.GError, e:
         if e.code == errno.ENOENT:
           errMsg = "readFederation.__isFile: File does not exist."
-          self.log.debug("readFederation.__isFile: File does not exist")
+          self.log.debug("readFederation.__isFile: File %s does not exist" % path)
+          return S_ERROR( errMsg )
+        elif e.code == errno.EHOSTDOWN:
+          errMsg = "readFederation.__isFile: Host unreachable: %s (%s)" % (e.message, path)
+          self.log.debug(errMsg)
           return S_ERROR( errMsg )
         else:
           tries += 1
@@ -259,7 +264,7 @@ class catalogAgent( object ):
     :returns nothing
     """
   
-    self.log.debug("readFederation: gathered more than 40 file links: comparing with catalog now")
+    self.log.debug("readFederation.__compareDictWithCatalog: Compare catalog with federation entries")
     failed = {}
     successful = {}
     dmScript = DMScript()
@@ -270,14 +275,13 @@ class catalogAgent( object ):
     # make this thing more efficient - maybe it would be better if we retrieved all LFNs for all the entries in the fileList at once
     for urlList in self.fileList:
       self.log.debug("readFederation: Retrieving LFN for %s" % urlList)
+      pdb.set_trace()
       lfn = dmScript.getLFNsFromList( urlList )
       if len(lfn):
-        lfn = lfn[0]
-        print lfn
         res = fc.getReplicas(lfn)
         if not res['OK']:
           res = res['Message']
-          failed[lfn] = res
+          failed[lfn[0]] = res
         else:
           res = res['Value']
           if lfn in res['Successful']:
