@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 import gfal2
 import errno
 import time
+from timer import Timer
 
 ##### remove this part once it's integrated as agent #
 from DIRAC.Core.Base.Script import parseCommandLine
@@ -37,13 +38,15 @@ class catalogAgent( object ):
 
     self.log = gLogger.getSubLogger( "readFederation", True )
     self.gfal2  = gfal2.creat_context()
-    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision15/BHADRON.MDST/00047850/0001/'
+    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision13/ALL.DST/00025015/0000/'
     self.fileList = []
     self.history = []
 
-    self.failedFiles = []
+    self.successfulFiles = {}
+    self.failedFiles = {}
+    self.failedSE = {}
     self.failedDirectories = []
-    self.failedEntries = []
+    
 
     #if a gfal2 operation fails for other reasons than NOEXIST we try again in 4 seconds
     self.sleepTime = 0
@@ -96,32 +99,34 @@ class catalogAgent( object ):
     caught_up = (self.recursionLevel == len(self.history)) # and (basepath == self.history[-1])
 
     directories = []
-
     res = self.__listDirectory( basepath )
     if res['OK']:
       entries = res['Value']
     else:
       entries = []
     self.log.debug("readFederation.__crawl: stating entries.")
+  
     for entry in entries:
       path = os.path.join( basepath, entry )
-      res = self.__isFile( path )
+      dav_path = "dav" + path[4:]
+      res = self.__isFile( dav_path )
       if not res['OK']:
-        self.failedFiles.append( {res['Message'][0] : res['Message'][1]} )
+        self.failedFiles[path] = "read_Federation.__crawl: %s" % res['Message']
         continue
-      
+  
+        
       # if res['Value'] is true then it's a file  
       if res['Value'] and caught_up:
         res = self.__readFile( path )
         if not res['OK']:
-          self.failedFiles[ {path : res['Message'] } ]
+          self.failedFiles[path] = "read_Federation.__readFiles: %s" % res['Message']
         xml_string = res['Value']
         PFNs = self.__extractPFNs( xml_string )
         self.fileList.append(PFNs)
 
         #only for debugging the compareDictWithCatalog method, remove following line
         # when done
-        #self.__compareDictWithCatalog()
+        #self.__compareFileListWithCatalog()
 
       elif not res['Value']:
         directories.append( entry )
@@ -130,13 +135,10 @@ class catalogAgent( object ):
     directories.sort(key=lambda x: x.lower())
 
     if len(self.fileList) > 40:
-      res = self.__compareDictWithCatalog()
+      res = self.__compareFileListWithCatalog()
       if res['OK']:
-        res = res['Value']
-        for key, value in res['Failed'].items():
-          print "%s: %s" % (key,value)
-        for key, value in res['Successful'].items():
-          print "%s: %s" % (key,value)
+        self.__mergeDictionaries(res['Value'])
+
 
     for directory in directories:
       if self.recursionLevel < len(self.history):
@@ -156,13 +158,19 @@ class catalogAgent( object ):
     self.recursionLevel -= 1
     self.log.debug( "readFederation.__crawl: Current recursion level: %s" % self.recursionLevel )
     if self.recursionLevel == 0:
-      self.__compareDictWithCatalog()
+      res = self.__compareFileListWithCatalog()
+      if res['OK']:
+        self.__mergeDictionaries(res['Value'])
       try:
         os.remove('checkpoint.txt')
       except Exception, e:
         self.log.error("readFederation.__crawl: Failed to remove checkpoint")
-      return S_OK( self.fileList )
+      return S_OK( {'Failed' : self.failedFiles, 'Successful' : self.successfulFiles, 'Failed SE' : self.failedSE } )
 
+  def __mergeDictionaries(self, res):
+    self.successfulFiles.update(res['Successful'])
+    self.failedFiles.update(res['Failed'])
+    self.failedSE.update(res['Failed SE'])
 
   def __listDirectory(self, path ):
     """ Listing the directory.
@@ -246,7 +254,7 @@ class catalogAgent( object ):
 
     return S_ERROR( "Couldn't check path, stopped trying after %s tries" % self.max_tries )
 
-  def __compareDictWithCatalog( self ):
+  def __compareFileListWithCatalog( self ):
     """ At this point we need to check for all the entries in the self.fileList if they are also in the catalog or not. The self.fileList
     represents the state on the storages and the catalog needs to match that.
     Depending on the number of replicas each entry in the fileList has one or more entries. For each sublist in fileList we generate the LFN.
@@ -264,51 +272,68 @@ class catalogAgent( object ):
     :returns nothing
     """
   
-    self.log.debug("readFederation.__compareDictWithCatalog: Compare catalog with federation entries")
+    self.log.debug("readFederation.__compareFileListWithCatalog: Compare catalog with federation entries")
     failed = {}
+    failedSE = {}
     successful = {}
     dmScript = DMScript()
     fc = FileCatalog()
     SEDict = {}
-    # TODO: make sure that this part works as intended - if storage element couldn't be initiated this needs to be
-    # noted in the failed message.
-    # make this thing more efficient - maybe it would be better if we retrieved all LFNs for all the entries in the fileList at once
     for urlList in self.fileList:
+      fullList = urlList
       self.log.debug("readFederation: Retrieving LFN for %s" % urlList)
-      pdb.set_trace()
       lfn = dmScript.getLFNsFromList( urlList )
-      if len(lfn):
-        res = fc.getReplicas(lfn)
+      if not len(lfn):
+        self.log.error("readFederation.__compareFileListWithCatalog: Failed to get LFN for %s" % urlList)
+        continue
+      # all the urls in urlList have the same LFN, it's the same file.
+      lfn = lfn[0]
+      # We need to put the lfn in a dict otherwise getReplicas doesn't work.
+      lfnDict = {lfn : True}
+      res = fc.getReplicas(lfnDict)
+      if not res['OK']:
+        self.log.debug("readFederation.__compareFileListWithCatalog: Completely failed to get Replicas")
+        failed[lfn] = "getReplicas: %s" % res['Message']
+        continue
+      
+      res = res['Value']
+      if not lfn in res['Successful']:
+        self.log.debug("readFederation.__compareFileListWithCatalog: Failed to get Replicas")
+        failed[lfn] = "getReplicas: %s" % res['Failed'][lfn]
+        continue
+      
+      # we have a list of replicas for a given LFN. SEList contains all the SE
+      # that store that file according to the catalog
+      SEList = res['Successful'][lfn].keys()
+      tURLList = []
+      for SE in SEList:
+        se = SEDict.get( SE, None )
+        if not se:
+          SEDict[SE] = StorageElement( SE, protocols='GFAL2_HTTP')
+          se = SEDict[SE]
+        res = se.getURL(lfn, protocol='http')
         if not res['OK']:
-          res = res['Message']
-          failed[lfn[0]] = res
+          # couldn't get transport URL (for example if the se wasn't properly instantiated)
+          if lfn in failed:
+            failedSE[lfn].append({SE : res['Message']})
+          else:
+            failedSE[lfn] = [{SE : res['Message']}]
         else:
-          res = res['Value']
-          if lfn in res['Successful']:
-            SEList = res['Successful'][lfn].keys()
-            for SE in SEList:
-              se = SEDict.get( SE, None )
-              if not se:
-                SEDict[SE] = StorageElement( SE, protocols='GFAL2_HTTP')
-                se = SEDict[SE]
-              res = se.getURL(lfn, protocol='http')
-              if res['OK']:
-                tURL = res['Value']['Successful'].values()[0]
-                # url holds all the urls that we need to check if they are also in the catalog so we compare if 
-                # any of the url from url is the same
-                while len(urlList):
-                  url = urlList.pop()
-                  if self.__compareURLS(tURL, url):
-                    successful[lfn] = True
-                  else:
-                    failed[lfn] = {url : 'Failed to find match in catalog'}
-              else:
-              # couldn't get transport URL (for example if the se wasn't properly instantiated)
-                failed[lfn] = {SE : (res['Message'], urlList)}
+          tURLList.append(res['Value']['Successful'].values()[0])
+      # url holds all the urls that we need to check if they are also in the catalog so we compare if 
+      # any of the url from url is the same
+      while len(urlList):
+        url = urlList.pop()
+        if any(self.__compareURLS(tURL, url) for tURL in tURLList):
+          successful[lfn] = True
+        else:
+          if lfn in failed:
+            failed[lfn].append({url : 'Failed to find match in catalog'})
+          else:
+            failed[lfn] = [{url : 'Failed to find match in catalog'}]
 
     self.fileList = []
-
-    return S_OK( { 'Successful' : successful, 'Failed' : failed } )
+    return S_OK( { 'Successful' : successful, 'Failed' : failed, 'Failed SE' : failedSE } )
 
   def __compareURLS( self, fc_url, fed_url ):
     """ This method compares URLs, but should also consider, that maybe one URL doesn't have a port specified while the other has
@@ -328,7 +353,7 @@ class catalogAgent( object ):
         # both keys have to exist and if their values are not the same then the url is not the same either
         # it is enough if one key is part of the other because sometimes configuration of a SE is
         # different to the convention
-      if fc_value and fed_value:  
+      if fc_value and fed_value:
         if not ((fc_value in fed_value) or (fed_value in fc_value)):
           isAMatch = False
           break
@@ -395,7 +420,12 @@ if __name__ == '__main__':
   CA = catalogAgent()
   gLogger.setLevel("DEBUG")
   CA.initialize()
-  CA.execute()
+  res = CA.execute()
+  for key, value in res['Value']['Failed SE'].items():
+    print key, value
+
+  for key, value in res['Value']['Successful'].items():
+    print key, value
   #print CA._catalogAgent__readFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/062426_0000000001.raw' )
   #print CA._catalogAgent__isFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/' )
 
