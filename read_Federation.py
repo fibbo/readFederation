@@ -38,7 +38,7 @@ class catalogAgent( object ):
 
     self.log = gLogger.getSubLogger( "readFederation", True )
     self.gfal2  = gfal2.creat_context()
-    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision13/ALL.DST/00025015/0000/'
+    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision13/'
     self.fileList = []
     self.history = []
 
@@ -105,7 +105,7 @@ class catalogAgent( object ):
     else:
       entries = []
     self.log.debug("readFederation.__crawl: stating entries.")
-  
+    
     for entry in entries:
       path = os.path.join( basepath, entry )
       dav_path = "dav" + path[4:]
@@ -294,6 +294,7 @@ class catalogAgent( object ):
       if not res['OK']:
         self.log.debug("readFederation.__compareFileListWithCatalog: Completely failed to get Replicas")
         failed[lfn] = "getReplicas: %s" % res['Message']
+        #if we cant get replicas we don't what the catalog knows
         continue
       
       res = res['Value']
@@ -314,23 +315,26 @@ class catalogAgent( object ):
         res = se.getURL(lfn, protocol='http')
         if not res['OK']:
           # couldn't get transport URL (for example if the se wasn't properly instantiated)
-          if lfn in failed:
-            failedSE[lfn].append({SE : res['Message']})
-          else:
-            failedSE[lfn] = [{SE : res['Message']}]
+          if not SE in failedSE:
+            failedSE[SE] = "Error while getting TURL: %s" % res['Message']
         else:
-          tURLList.append(res['Value']['Successful'].values()[0])
+          if 'Successful' in res['Value']:
+            tURLList.append(res['Value']['Successful'].values()[0])
+            
       # url holds all the urls that we need to check if they are also in the catalog so we compare if 
       # any of the url from url is the same
       while len(urlList):
         url = urlList.pop()
-        if any(self.__compareURLS(tURL, url) for tURL in tURLList):
-          successful[lfn] = True
-        else:
-          if lfn in failed:
-            failed[lfn].append({url : 'Failed to find match in catalog'})
+        if tURLList:
+          if any(self.__compareURLS(tURL, url) for tURL in tURLList):
+            successful[lfn] = True
           else:
-            failed[lfn] = [{url : 'Failed to find match in catalog'}]
+            if lfn in failed:
+              failed[lfn].append({url : 'Failed to find match in catalog'})
+            else:
+              failed[lfn] = [{url : 'Failed to find match in catalog'}]
+        else:
+          failed[lfn] = [{url : "Unable to retrieve any valid TURL. Probably because I wasn't able to instantiate any SE for this LFN"}]
 
     self.fileList = []
     return S_OK( { 'Successful' : successful, 'Failed' : failed, 'Failed SE' : failedSE } )
@@ -425,6 +429,9 @@ if __name__ == '__main__':
     print key, value
 
   for key, value in res['Value']['Successful'].items():
+    print key, value
+
+  for key, value in res['Value']['Failed'].items():
     print key, value
   #print CA._catalogAgent__readFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/062426_0000000001.raw' )
   #print CA._catalogAgent__isFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/' )
