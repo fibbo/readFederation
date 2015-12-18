@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 import gfal2
 import errno
 import time
+import cPickle as pickle
 from timer import Timer
 
 ##### remove this part once it's integrated as agent #
@@ -38,7 +39,8 @@ class catalogAgent( object ):
 
     self.log = gLogger.getSubLogger( "readFederation", True )
     self.gfal2  = gfal2.creat_context()
-    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision13/'
+    # self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/'
+    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/'
     self.fileList = []
     self.history = []
 
@@ -104,7 +106,7 @@ class catalogAgent( object ):
       entries = res['Value']
     else:
       entries = []
-    self.log.debug("readFederation.__crawl: stating entries.")
+    self.log.notice("readFederation.__crawl: stating entries.")
     
     for entry in entries:
       path = os.path.join( basepath, entry )
@@ -156,7 +158,7 @@ class catalogAgent( object ):
       self.history.pop()
 
     self.recursionLevel -= 1
-    self.log.debug( "readFederation.__crawl: Current recursion level: %s" % self.recursionLevel )
+    self.log.notice( "readFederation.__crawl: Current recursion level: %s" % self.recursionLevel )
     if self.recursionLevel == 0:
       res = self.__compareFileListWithCatalog()
       if res['OK']:
@@ -182,7 +184,7 @@ class catalogAgent( object ):
 
     """
 
-    self.log.debug("readFederation.__listDirectory: Listing the current directory: %s" % path)
+    self.log.notice("readFederation.__listDirectory: Listing the current directory: %s" % path)
     entries = []
     tries = 0
     while tries < self.max_tries:
@@ -272,7 +274,7 @@ class catalogAgent( object ):
     :returns nothing
     """
   
-    self.log.debug("readFederation.__compareFileListWithCatalog: Compare catalog with federation entries")
+    self.log.notice("readFederation.__compareFileListWithCatalog: Compare catalog with federation entries")
     failed = {}
     failedSE = {}
     successful = {}
@@ -346,7 +348,7 @@ class catalogAgent( object ):
     :param self: self reference
     :param list fc_url: 
     """
-    self.log.debug("readFederation.__compareURLS: comparing TURL from SE with TURL from federation")
+    self.log.notice("readFederation.__compareURLS: comparing TURL from SE with TURL from federation")
     fc_res = pfnparse(fc_url)['Value']
     fed_res = pfnparse(fed_url)['Value']
     key_list = ['Path', 'Filename', 'Port', 'Protocol', 'Host', 'WSUrl']
@@ -422,9 +424,10 @@ class catalogAgent( object ):
 
 if __name__ == '__main__':  
   CA = catalogAgent()
-  gLogger.setLevel("DEBUG")
+  gLogger.setLevel("NOTICE")
   CA.initialize()
   res = CA.execute()
+  pickle.dump(res['Value'], open('crawlResults.pkl', 'wb'))
   for key, value in res['Value']['Failed SE'].items():
     print key, value
 
