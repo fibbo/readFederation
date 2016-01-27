@@ -41,11 +41,14 @@ class catalogAgent( object ):
     self.log = gLogger.getSubLogger( "readFederation", True )
     self.gfal2  = gfal2.creat_context()
     self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision12_25/BHADRON.MDST/00022722/0000/'
-    self.dedicatedSE = None #['CNAF_M-DST','IN2P3_M-DST']
+    self.dedicatedSE = ['CNAF_M-DST','IN2P3_M-DST','CERN-USER']
     # self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/BHADRON.DST/00010938/0000'
     self.fileList = []
     self.history = []
-    self.SEDict = self.__instantiateSEs()
+    res = self.__instantiateSEs()
+    if not res['OK']:
+      return S_ERROR('Failed to instantiate Storage Elements.')
+    self.SEDict = res['Value']
     self.successfulFiles = {}
     self.failedFiles = {}
     self.failedSE = {}
@@ -69,6 +72,8 @@ class catalogAgent( object ):
       with open('checkpoint.txt') as f:
         self.history = f.read().splitlines()
 
+    return S_OK()
+
   def __instantiateSEs(self):
     """ Get storage config for all the SE in the dirac config. """
 
@@ -81,7 +86,7 @@ class catalogAgent( object ):
     for SE in SEList:
       SEDict[SE] = StorageElement( SE, protocols='GFAL2_HTTP')
 
-    return SEDict
+    return S_OK(SEDict)
 
 
 
@@ -268,7 +273,7 @@ class catalogAgent( object ):
         self.log.debug("readFederation.__isFile: stating worked")
         return S_OK( S_ISREG( statInfo.st_mode ) )
       except gfal2.GError, e:
-        if e.compareDictWithCataloge == errno.ENOENT:
+        if e.code == errno.ENOENT:
           errMsg = "readFederation.__isFile: File does not exist."
           self.log.debug("readFederation.__isFile: File %s does not exist" % path)
           return S_ERROR( errMsg )
@@ -290,16 +295,11 @@ class catalogAgent( object ):
     Depending on the number of replicas each entry in the fileList has one or more entries. For each sublist in fileList we generate the LFN.
     With that LFN we poll the catalog to find out what the catalog knows about this file. From that information we extract the SE where the
     catalog thinks the files are stored on.
-    For each SE we intialize a StorageElement object which we save in a dict so if we need to use that particular SE more than once we don't
-    initialize over and over again.
-    Then for each SE we get the transport URL and check if one of the entries from urlList (which itself is an entry from self.fileList) matches
-    with the transport URL from the SE then the catalog knows about that file which is good. In any case the entry is removed from the urlList
-    and either put to the successful or failed dict.
-    If we fail to instantiate a SE all the transportURL queries will fail so we put those LFNs that poll that SE also in the failed with that
-    message.
+    Then for each SE we get the transport URL and check if one of the entries from urlList matches
+    with the transport URL from the SE, if not the catalog doesn't know about the file.
 
-    :param self: self reference
-    :returns nothing
+    @param: self - self reference
+    @returns: S_OK(failedDict and failedSEDict)
     """
   
     self.log.notice("readFederation.__compareFileListWithCatalog: Compare catalog with federation entries")
@@ -356,6 +356,13 @@ class catalogAgent( object ):
     return S_OK( { 'Successful' : successful, 'Failed' : failed, 'Failed SE' : failedSE } )
 
   def __getSEListFromReplicas(self, lfn):
+    """ Get the SEs which have a replica of the lfn
+    @param: self - self reference
+    @param: string lfn - lfn for which the replicas are retrieved
+    @returns S_ERROR when retrieving replicas failed
+             S_OK(SEList) otherwise
+
+    """
     fc = FileCatalog()
     lfnDict = {lfn : True}
     res = fc.getReplicas(lfnDict)
@@ -373,6 +380,18 @@ class catalogAgent( object ):
     return S_OK(res['Successful'][lfn].keys())
 
   def __compareForDedicatedSE(self):
+    """ Method to check against a list of dedicated storage elements. For each url list for a single file
+    the method checks whether or not the file belongs to the dedicated storage element. For that first 
+    the tURLs for each dedicated storage element will be retrieved and then compare these tURLs with the
+    urls from the urlList. If the test is successful means that this file should be listed in the catalog
+    under this storage element. So getReplicas lists all storage elements where the catalog thinks the file
+    is stored. If the dedicated SE is not in the list then the catalog is incomplete.
+
+    @param: self - self reference
+    @returns: S_OK(failedDict and failedSEDict)
+
+
+    """
     self.log.notice("readFederation.__compareForDedicatedSE: Compare specific SE with federation entries")
     failed = {}
     failedSE = {}
@@ -388,6 +407,7 @@ class catalogAgent( object ):
       lfn = lfn[0]
 
       tURLsFromDedicatedSE = []  
+      # get tURLs from the dedicated storage elements
       for SE in self.dedicatedSE:
         se = self.SEDict[SE]
         res = se.getURL(lfn, protocol='http')
@@ -416,8 +436,8 @@ class catalogAgent( object ):
               failed[lfn].append({'Failed to find match in catalog for %s' % SE})
             else:
               failed[lfn] = [{'Failed to find match in catalog for %s' % SE}]
-          else:
-            successful[lfn] = True
+          # else:
+          #   successful[lfn] = True
     self.fileList = []
     return S_OK( { 'Successful' : successful, 'Failed' : failed, 'Failed SE' : failedSE } )
 
@@ -506,10 +526,13 @@ class catalogAgent( object ):
 if __name__ == '__main__':  
   CA = catalogAgent()
   gLogger.setLevel("NOTICE")
-  CA.initialize()
-  res = CA.execute()
-  pickle.dump(res['Value'], open('crawlResults.pkl', 'wb'))
-  print "Crawl finished."
+  res = CA.initialize()
+  if not res['OK']:
+    print 'Initialisation failed: %s' % res['Message']
+  else:
+    res = CA.execute()
+    pickle.dump(res['Value'], open('crawlResults.pkl', 'wb'))
+    print "Crawl finished."
   #print CA._catalogAgent__readFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/062426_0000000001.raw' )
   #print CA._catalogAgent__isFile( 'http://federation.desy.de/fed/lhcb/data/2009/RAW/FULL/LHCb/BEAM1/62426/' )
 
