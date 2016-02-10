@@ -51,7 +51,7 @@ class catalogAgent( object ):
     self.SEDict = res['Value']
     self.successfulFiles = {}
     self.failedFiles = {}
-    self.failedSE = {}
+    self.failedURLs = {}
     self.failedDirectories = []
     self.scannedFiles = 0
     self.scannedDirectories = 0
@@ -84,8 +84,26 @@ class catalogAgent( object ):
       return S_ERROR('Not able to get StorageConfig: %s') % res['Message']
     SEList = res['Value']
     for SE in SEList:
-      SEDict[SE] = StorageElement( SE, protocols='GFAL2_HTTP')
+      seConfigPath = os.path.join(configPath, SE)
+      res = gConfig.getSections(seConfigPath)
+      if not res['OK']:
+        continue
+      
+      # contains 'AccessProtocol.x'
+      accessProtocols = res['Value']
+      for entry in accessProtocols:
+        protocolConfigPath = os.path.join(seConfigPath, entry)
+        res = gConfig.getOptionsDict(protocolConfigPath)
+        if not res['OK']:
+          continue
+        res = res['Value']
 
+        # there should only be one GFAL2_HTTP plugin defined
+        if res.get('PluginName', None) == 'GFAL2_HTTP':
+          if not SEDict.get(res['Host'], None):
+            SEDict[res['Host']] = {}
+          SEDict[res['Host']][SE] = {}
+          SEDict[res['Host']][SE]['Parameters'] = res
     return S_OK(SEDict)
 
 
@@ -164,10 +182,7 @@ class catalogAgent( object ):
     directories.sort(key=lambda x: x.lower())
 
     if len(self.fileList) > 40:
-      if not self.dedicatedSE:
-        res = self.__compareFileListWithCatalog()
-      else:
-        res = self.__compareForDedicatedSE()
+      res = self.__compareFileListWithCatalog()
       if res['OK']:
         self.__mergeDictionaries(res['Value'])
 
@@ -190,22 +205,19 @@ class catalogAgent( object ):
     self.recursionLevel -= 1
     self.log.notice( "readFederation.__crawl: Current recursion level: %s" % self.recursionLevel )
     if self.recursionLevel == 0:
-      if not self.dedicatedSE:
-        res = self.__compareFileListWithCatalog()
-      else:
-        res = self.__compareForDedicatedSE()
+      res = self.__compareFileListWithCatalog()
       if res['OK']:
         self.__mergeDictionaries(res['Value'])
       try:
         os.remove('checkpoint.txt')
       except Exception, e:
         self.log.error("readFederation.__crawl: Failed to remove checkpoint")
-      return S_OK( {'Failed' : self.failedFiles, 'Successful' : self.successfulFiles, 'Failed SE' : self.failedSE } )
+      return S_OK( {'Failed' : self.failedFiles, 'Successful' : self.successfulFiles, 'Failed URLs' : self.failedURLs } )
 
   def __mergeDictionaries(self, res):
     self.successfulFiles.update(res['Successful'])
     self.failedFiles.update(res['Failed'])
-    self.failedSE.update(res['Failed SE'])
+    self.failedURLs.update(res['Failed URLs'])
 
   def __listDirectory(self, path ):
     """ Listing the directory.
@@ -290,70 +302,66 @@ class catalogAgent( object ):
     return S_ERROR( "Couldn't check path, stopped trying after %s tries" % self.max_tries )
 
   def __compareFileListWithCatalog( self ):
-    """ At this point we need to check for all the entries in the self.fileList if they are also in the catalog or not. The self.fileList
-    represents the state on the storages and the catalog needs to match that.
-    Depending on the number of replicas each entry in the fileList has one or more entries. For each sublist in fileList we generate the LFN.
-    With that LFN we poll the catalog to find out what the catalog knows about this file. From that information we extract the SE where the
-    catalog thinks the files are stored on.
-    Then for each SE we get the transport URL and check if one of the entries from urlList matches
-    with the transport URL from the SE, if not the catalog doesn't know about the file.
-
-    @param: self - self reference
-    @returns: S_OK(failedDict and failedSEDict)
-    """
-  
-    self.log.notice("readFederation.__compareFileListWithCatalog: Compare catalog with federation entries")
-    failed = {}
-    failedSE = {}
     successful = {}
+    failed = {}
+    failedFiles = {}
     dmScript = DMScript()
+
     for urlList in self.fileList:
-      self.log.debug("readFederation: Retrieving LFN for %s" % urlList)
       lfn = dmScript.getLFNsFromList( urlList )
       if not len(lfn):
-        self.log.error("readFederation.__compareFileListWithCatalog: can't get LFN from HTTP URL %s" % urlList)
+        self.log.error( "readFederation.__compareFileListWithCatalog: can't get \
+          LFN from HTTP url %s" % urlList )
         continue
-      # all the urls in urlList have the same LFN, it's the same file.
       lfn = lfn[0]
-      # We need to put the lfn in a dict otherwise getReplicas doesn't work.
-      lfnDict = {lfn : True}
+
+      SEListPerLFN = []
+      for url in urlList:
+        # find on which SEs the file should be stored.
+        SEs = []
+        res = pfnparse(url)
+        if not res['OK']:
+          continue
+        parsed_dict = res['Value']
+        host = parsed_dict['Host']
+        try:
+          for SEName in self.SEDict[host]:
+            # some SEs have identical configuration - so if they have the same host address
+            # we will check if the file is at least in one of these SEs according to the 
+            # catalog
+            SEs.append(SEName)
+        except KeyError:
+          failedFiles[url] = "readFederation.__compareFileListWithCatalog: self.SEDict has no key %s" % host
+
+        SEListPerLFN.append(SEs)
+
+      confirmedSE = []
+
+      # If checking for dedicated SEs clean up the SEListPerLFN so only dedicated SEs
+      # will be checked
+      if self.dedicatedSE:
+        for subList in SEListPerLFN:
+          if any(dedicatedSE in subList for dedicatedSE in self.dedicatedSE):
+            confirmedSE.append(subList)
+      else:
+        confirmedSE = SEListPerLFN
 
       res = self.__getSEListFromReplicas(lfn)
       if not res['OK']:
         failed[lfn] = res['Message']
       else:
         SEList = res['Value']
-         
-      # url holds all the urls that we need to check if they are also in the catalog so we compare if 
-      # any of the url from url is the same
-      tURLList = []
-      for SE in SEList:
-        se = self.SEDict.get(SE,None)
-        if se:
-          res = se.getURL(lfn, protocol='http')
-          if not res['OK']:
-            # couldn't get transport URL (for example if the SE wasn't properly instantiated)
-            if not SE in failedSE:
-              failedSE[SE] = "Error while getting TURL: %s" % res['Message']
+        for SESubList in confirmedSE:
+          for SE in SEList:
+            if SE not in SESubList:
+              if lfn in failed:
+                failed[lfn].append('Failed to find match in catalog for %s' % SE)
+              else:
+                failed[lfn] = ['Failed to find match in catalog for %s' % SE]
           else:
-            if 'Successful' in res['Value']:
-              tURLList.append(res['Value']['Successful'].values()[0])
-      while len(urlList):
-        url = urlList.pop()
-        if tURLList:
-          if any(self.__compareURLS(tURL, url) for tURL in tURLList):
-            # http entry found in the catalog
-            continue
-          else:
-            if lfn in failed:
-              failed[lfn].append({url : 'Failed to find match in catalog'})
-            else:
-              failed[lfn] = [{url : 'Failed to find match in catalog'}]
-        else:
-          failed[lfn] = [{url : "Unable to retrieve any valid TURL. Probably because I wasn't able to instantiate any SE for this LFN"}]
-
+            successful[lfn] = True
     self.fileList = []
-    return S_OK( { 'Successful' : successful, 'Failed' : failed, 'Failed SE' : failedSE } )
+    return S_OK( { 'Successful' : successful, 'Failed' : failed, 'Failed URLs' : failedFiles } )
 
   def __getSEListFromReplicas(self, lfn):
     """ Get the SEs which have a replica of the lfn
@@ -378,96 +386,6 @@ class catalogAgent( object ):
     # we have a list of replicas for a given LFN. SEList contains all the SE
     # that store that file according to the catalog
     return S_OK(res['Successful'][lfn].keys())
-
-  def __compareForDedicatedSE(self):
-    """ Method to check against a list of dedicated storage elements. For each url list for a single file
-    the method checks whether or not the file belongs to the dedicated storage element. For that first 
-    the tURLs for each dedicated storage element will be retrieved and then compare these tURLs with the
-    urls from the urlList. If the test is successful means that this file should be listed in the catalog
-    under this storage element. So getReplicas lists all storage elements where the catalog thinks the file
-    is stored. If the dedicated SE is not in the list then the catalog is incomplete.
-
-    @param: self - self reference
-    @returns: S_OK(failedDict and failedSEDict)
-
-
-    """
-    self.log.notice("readFederation.__compareForDedicatedSE: Compare specific SE with federation entries")
-    failed = {}
-    failedSE = {}
-    successful = {}
-    dmScript = DMScript()
-    for urlList in self.fileList:
-      self.log.debug("readFederation: Retrieving LFN for %s" % urlList)
-      lfn = dmScript.getLFNsFromList( urlList )
-      if not len(lfn):
-        self.log.error("readFederation.__compareFileListWithCatalog: can't get LFN from HTTP URL %s" % urlList)
-        continue
-      # all the urls in urlList have the same LFN, it's the same file.
-      lfn = lfn[0]
-
-      tURLsFromDedicatedSE = []  
-      # get tURLs from the dedicated storage elements
-      for SE in self.dedicatedSE:
-        se = self.SEDict[SE]
-        res = se.getURL(lfn, protocol='http')
-        if not res['OK']:
-          # couldn't get transport URL (for example if the SE wasn't properly instantiated)
-          if not SE in failedSE:
-            failedSE[SE] = "Error while getting TURL: %s" % res['Message']
-        else:
-          if 'Successful' in res['Value']:
-            tURLsFromDedicatedSE.append( (res['Value']['Successful'].values()[0], SE) )
-      
-      confirmedSE = []
-      for url in urlList:
-        for tURL, SE in tURLsFromDedicatedSE:
-          if self.__compareURLS(url, tURL):
-            confirmedSE.append(SE)
-
-      res = self.__getSEListFromReplicas(lfn)
-      if not res['OK']:
-        failed[lfn] = res['Message']
-      else:
-        SEList = res['Value']
-        for SE in confirmedSE:
-          if SE not in SEList:
-            if lfn in failed:
-              failed[lfn].append({'Failed to find match in catalog for %s' % SE})
-            else:
-              failed[lfn] = [{'Failed to find match in catalog for %s' % SE}]
-          # else:
-          #   successful[lfn] = True
-    self.fileList = []
-    return S_OK( { 'Successful' : successful, 'Failed' : failed, 'Failed SE' : failedSE } )
-
-
-  def __compareURLS( self, fc_url, fed_url ):
-    """ This method compares URLs, but should also consider, that maybe one URL doesn't have a port specified while the other has
-    It is assumed that both URLs at least have protocol, host, path and filename defined.
-
-    :param self: self reference
-    :param list fc_url: 
-    """
-    self.log.debug("readFederation.__compareURLS: comparing TURL from SE with TURL from federation")
-    fc_res = pfnparse(fc_url)['Value']
-    fed_res = pfnparse(fed_url)['Value']
-    key_list = ['Path', 'Filename', 'Port', 'Protocol', 'Host', 'WSUrl']
-    isAMatch = True
-    for key in key_list:
-      fc_value = fc_res.get(key)
-      fed_value = fed_res.get(key)
-        # both keys have to exist and if their values are not the same then the url is not the same either
-        # it is enough if one key is part of the other because sometimes configuration of a SE is
-        # different to the convention
-      if fc_value and fed_value:
-        if not ((fc_value in fed_value) or (fed_value in fc_value)):
-          isAMatch = False
-          break
-
-    return isAMatch
-
-
 
   def __readFile( self, afile ):
     """ Read the xml data from the file. Using gfal2.open to open file and read
