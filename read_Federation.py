@@ -40,9 +40,9 @@ class catalogAgent( object ):
 
     self.log = gLogger.getSubLogger( "readFederation", True )
     self.gfal2  = gfal2.creat_context()
-    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision12_25/BHADRON.MDST/00022722/0000/'
+    # self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/FULL.DST/00037160/0000'
     self.dedicatedSE = ['CNAF_M-DST','IN2P3_M-DST','CERN-USER']
-    # self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/BHADRON.DST/00010938/0000'
+    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/BHADRON.DST/00010938/0000'
     self.fileList = []
     self.history = []
     res = self.__instantiateSEs()
@@ -51,7 +51,7 @@ class catalogAgent( object ):
     self.SEDict = res['Value']
     self.successfulFiles = {}
     self.failedFiles = {}
-    self.failedURLs = {}
+    self.failedHostKey = {}
     self.failedDirectories = []
     self.scannedFiles = 0
     self.scannedDirectories = 0
@@ -102,8 +102,7 @@ class catalogAgent( object ):
         if res.get('PluginName', None) == 'GFAL2_HTTP':
           if not SEDict.get(res['Host'], None):
             SEDict[res['Host']] = {}
-          SEDict[res['Host']][SE] = {}
-          SEDict[res['Host']][SE]['Parameters'] = res
+          SEDict[res['Host']][SE] = res
     return S_OK(SEDict)
 
 
@@ -212,12 +211,12 @@ class catalogAgent( object ):
         os.remove('checkpoint.txt')
       except Exception, e:
         self.log.error("readFederation.__crawl: Failed to remove checkpoint")
-      return S_OK( {'Failed' : self.failedFiles, 'Successful' : self.successfulFiles, 'Failed URLs' : self.failedURLs } )
+      return S_OK( {'Failed' : self.failedFiles, 'Successful' : self.successfulFiles, 'Failed Host' : self.failedHostKey } )
 
   def __mergeDictionaries(self, res):
     self.successfulFiles.update(res['Successful'])
     self.failedFiles.update(res['Failed'])
-    self.failedURLs.update(res['Failed URLs'])
+    self.failedHostKey.update(res['Failed Host'])
 
   def __listDirectory(self, path ):
     """ Listing the directory.
@@ -304,7 +303,7 @@ class catalogAgent( object ):
   def __compareFileListWithCatalog( self ):
     successful = {}
     failed = {}
-    failedFiles = {}
+    failedHostKey = {}
     dmScript = DMScript()
 
     for urlList in self.fileList:
@@ -331,7 +330,8 @@ class catalogAgent( object ):
             # catalog
             SEs.append(SEName)
         except KeyError:
-          failedFiles[url] = "readFederation.__compareFileListWithCatalog: self.SEDict has no key %s" % host
+          failedHostKey[url] = "readFederation.__compareFileListWithCatalog: self.SEDict has no key %s. \
+                              Check if SE is defined in config." % host
 
         SEListPerLFN.append(SEs)
 
@@ -352,16 +352,16 @@ class catalogAgent( object ):
       else:
         SEList = res['Value']
         for SESubList in confirmedSE:
-          for SE in SEList:
-            if SE not in SESubList:
-              if lfn in failed:
-                failed[lfn].append('Failed to find match in catalog for %s' % SE)
-              else:
-                failed[lfn] = ['Failed to find match in catalog for %s' % SE]
-          else:
-            successful[lfn] = True
+          if not any(SE in SEList for SE in SESubList):
+            if lfn in failed:
+              failed[lfn].append('Failed to find match in catalog for %s' % SESubList)
+            else:
+              failed[lfn] = ['Failed to find match in catalog for %s' % SESubList]
+          # else:
+          #   successful[lfn] = True
+            
     self.fileList = []
-    return S_OK( { 'Successful' : successful, 'Failed' : failed, 'Failed URLs' : failedFiles } )
+    return S_OK( { 'Successful' : successful, 'Failed' : failed, 'Failed Host' : failedHostKey } )
 
   def __getSEListFromReplicas(self, lfn):
     """ Get the SEs which have a replica of the lfn
