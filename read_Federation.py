@@ -7,7 +7,7 @@ import errno
 import time
 import cPickle as pickle
 from timer import Timer
-
+from datetime import datetime
 ##### remove this part once it's integrated as agent #
 from DIRAC.Core.Base.Script import parseCommandLine
 from symbol import parameters
@@ -40,9 +40,9 @@ class catalogAgent( object ):
 
     self.log = gLogger.getSubLogger( "readFederation", True )
     self.gfal2  = gfal2.creat_context()
-    # self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/FULL.DST/00037160/0000'
-    self.dedicatedSE = ['CNAF_M-DST','IN2P3_M-DST','CERN-USER']
-    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/BHADRON.DST/00010938/0000'
+    self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10'
+    self.dedicatedSE = [] #['CNAF_M-DST','IN2P3_M-DST','CERN-USER']
+    # self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/BHADRON.DST/00010938/0000'
     self.fileList = []
     self.history = []
     res = self.__instantiateSEs()
@@ -84,6 +84,8 @@ class catalogAgent( object ):
       return S_ERROR('Not able to get StorageConfig: %s') % res['Message']
     SEList = res['Value']
     for SE in SEList:
+      # se = StorageElement(SE, protocols='GFAL2_HTTP')
+      # se.getParameters()
       seConfigPath = os.path.join(configPath, SE)
       res = gConfig.getSections(seConfigPath)
       if not res['OK']:
@@ -148,12 +150,13 @@ class catalogAgent( object ):
       entries = res['Value']
     else:
       entries = []
-    self.log.notice("readFederation.__crawl: stating entries.")
+    t = datetime.now()
+    self.log.notice("%02d:%02d:%02d - readFederation.__crawl: stating entries." % (t.hour,t.minute,t.second)) 
     
     for entry in entries:
       path = os.path.join( basepath, entry )
-      dav_path = "dav" + path[4:]
-      res = self.__isFile( dav_path )
+      path = "dav" + path[4:]
+      res = self.__isFile( path )
       if not res['OK']:
         self.failedFiles[path] = "read_Federation.__crawl: %s" % res['Message']
         continue
@@ -306,6 +309,8 @@ class catalogAgent( object ):
     failedHostKey = {}
     dmScript = DMScript()
 
+    lfnFileDict = {}
+    lfnDict = {}
     for urlList in self.fileList:
       lfn = dmScript.getLFNsFromList( urlList )
       if not len(lfn):
@@ -313,7 +318,19 @@ class catalogAgent( object ):
           LFN from HTTP url %s" % urlList )
         continue
       lfn = lfn[0]
+      lfnDict[lfn] = True
+      lfnFileDict[lfn] = urlList
 
+    res = self.__getSEListFromReplicas(lfnDict)
+    if not res:
+      errMsg = "readFederation:.__compareFileListWithCatalog: Failed to\
+      get SEs from replicas."
+      self.log.error(errMsg)
+      return S_ERROR( errMsg )
+
+    fullSEList = res
+
+    for lfn, urlList in lfnFileDict.items():
       SEListPerLFN = []
       for url in urlList:
         # find on which SEs the file should be stored.
@@ -346,24 +363,24 @@ class catalogAgent( object ):
       else:
         confirmedSE = SEListPerLFN
 
-      res = self.__getSEListFromReplicas(lfn)
-      if not res['OK']:
-        failed[lfn] = res['Message']
+      if fullSEList.has_key(lfn):
+        SEList = fullSEList[lfn].keys()
       else:
-        SEList = res['Value']
-        for SESubList in confirmedSE:
-          if not any(SE in SEList for SE in SESubList):
-            if lfn in failed:
-              failed[lfn].append('Failed to find match in catalog for %s' % SESubList)
-            else:
-              failed[lfn] = ['Failed to find match in catalog for %s' % SESubList]
-          # else:
-          #   successful[lfn] = True
+        failedHostKey[lfn] = 'No SEList available for this LFN'
+        continue
+      for SESubList in confirmedSE:
+        if not any(SE in SEList for SE in SESubList):
+          if lfn in failed:
+            failed[lfn].append('Failed to find match in catalog for %s' % SESubList)
+          else:
+            failed[lfn] = ['Failed to find match in catalog for %s' % SESubList]
+        else:
+          successful[lfn] = True
             
     self.fileList = []
     return S_OK( { 'Successful' : successful, 'Failed' : failed, 'Failed Host' : failedHostKey } )
 
-  def __getSEListFromReplicas(self, lfn):
+  def __getSEListFromReplicas(self, lfnDict):
     """ Get the SEs which have a replica of the lfn
     @param: self - self reference
     @param: string lfn - lfn for which the replicas are retrieved
@@ -372,20 +389,20 @@ class catalogAgent( object ):
 
     """
     fc = FileCatalog()
-    lfnDict = {lfn : True}
+    # lfnDict = {lfn : True}
     res = fc.getReplicas(lfnDict)
     if not res['OK']:
       self.log.debug("readFederation.__compareFileListWithCatalog: Completely failed to get Replicas")
       return S_ERROR("getReplicas: %s" % res['Message'])
     
     res = res['Value']
-    if not lfn in res['Successful']:
-      self.log.debug("readFederation.__compareFileListWithCatalog: Failed to get Replicas")
-      return S_ERROR("getReplicas: %s" % res['Failed'][lfn])
+    # if not lfn in res['Successful']:
+    #   self.log.debug("readFederation.__compareFileListWithCatalog: Failed to get Replicas")
+    #   return S_ERROR("getReplicas: %s" % res['Failed'][lfn])
     
     # we have a list of replicas for a given LFN. SEList contains all the SE
     # that store that file according to the catalog
-    return S_OK(res['Successful'][lfn].keys())
+    return res.get('Successful', None)
 
   def __readFile( self, afile ):
     """ Read the xml data from the file. Using gfal2.open to open file and read
