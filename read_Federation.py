@@ -42,7 +42,6 @@ class catalogAgent( object ):
     self.gfal2  = gfal2.creat_context()
     self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10'
     self.dedicatedSE = [] #['CNAF_M-DST','IN2P3_M-DST','CERN-USER']
-    # self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10/BHADRON.DST/00010938/0000'
     self.fileList = []
     self.history = []
     res = self.__instantiateSEs()
@@ -140,9 +139,10 @@ class catalogAgent( object ):
       self.__writeCheckPoint()
     self.recursionLevel += 1
 
-    # if two folders with the same name are on the same level but different branches this will not be a good enough condition
-    # needs improvement
-    caught_up = (self.recursionLevel == len(self.history)) # and (basepath == self.history[-1])
+    # together with the commented part the whole expression should work as proper condition 
+    # for successful checkpoint recovery. First part alone is probably not enough. 
+    # TODO: Uncomment and test
+    caught_up = (self.recursionLevel == len(self.history)) # and (os.path.basename( basepath ) == self.history[-1])
 
     directories = []
     res = self.__listDirectory( basepath )
@@ -311,23 +311,27 @@ class catalogAgent( object ):
 
     lfnFileDict = {}
     lfnDict = {}
+
+    # for each file we have one or more http entries, but they all ahve the same lfn
+    # We save the lfns in a dict because FileCatalog.getReplicas needs a dictionary to work
+    # Also for each lfn key we assign the corresponding urlList. 
     for urlList in self.fileList:
       lfn = dmScript.getLFNsFromList( urlList )
       if not len(lfn):
-        self.log.error( "readFederation.__compareFileListWithCatalog: can't get \
-          LFN from HTTP url %s" % urlList )
+        self.log.error( "readFederation.__compareFileListWithCatalog: can't get LFN from HTTP url %s" % urlList )
         continue
       lfn = lfn[0]
       lfnDict[lfn] = True
       lfnFileDict[lfn] = urlList
 
+
     res = self.__getSEListFromReplicas(lfnDict)
     if not res:
-      errMsg = "readFederation:.__compareFileListWithCatalog: Failed to\
-      get SEs from replicas."
+      errMsg = "readFederation:.__compareFileListWithCatalog: Failed to get SEs from replicas."
       self.log.error(errMsg)
       return S_ERROR( errMsg )
 
+    # all the possible storage elements
     fullSEList = res
 
     for lfn, urlList in lfnFileDict.items():
@@ -347,8 +351,7 @@ class catalogAgent( object ):
             # catalog
             SEs.append(SEName)
         except KeyError:
-          failedHostKey[url] = "readFederation.__compareFileListWithCatalog: self.SEDict has no key %s. \
-                              Check if SE is defined in config." % host
+          failedHostKey[url] = "readFederation.__compareFileListWithCatalog: self.SEDict has no key %s. Check if SE is defined in config." % host
 
         SEListPerLFN.append(SEs)
 
