@@ -27,14 +27,14 @@ they are in the catalogs under Y and Z.
 
 #### To be done
 
-For now the crawler saves the results in a pickle file and this only after it has finished crawling. This should be improved that the crawl will be dumped in specific intervalls (i.e. after ˜5000 files have been checked). After x files checked it should either:
+For now the crawler saves the results in a pickle file and this only after it has finished crawling. This should be improved that the crawl will be dumped in specific intervalls (i.e. after ˜5000 files have been checked). After each intervall checked it could either:
 
 * read the pickle dump into a dictionary
 * update the dictionary with the new results
-* dump the results
+* dump the updated dictionary
 
 or
 
 * dump the dictionary with the x files result in a new pickle file
 
-Method could suffer from long dumping times because it rereads the pickle dump (you cannot add to an existing pickle). Method two will possibly create many pickle files. A database approach is also possible.
+The first method could suffer from long dumping times because it rereads the pickle dump (you cannot add to an existing pickle). Method two will possibly create many pickle files. A database approach is also possible.
