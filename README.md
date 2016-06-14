@@ -7,14 +7,18 @@ For now the crawler is a standalone agent. Proper DIRAC agent behaviour has to b
 #### Usage
 
 To start the agent initialize the catalog agent and initialize.
+```
 CA = catalogAgent()
   gLogger.setLevel("NOTICE")
   res = CA.initialize()
+```
 
 Following two parameters are in the initializer that can be changed:
 
+```
 self.rootURL = 'http://federation.desy.de/fed/lhcb/LHCb/Collision10'
 self.dedicatedSE = [] #['CNAF_M-DST','IN2P3_M-DST','CERN-USER']
+```
 
 self.rootURL: Starting point of the crawl. Once the rootURL is reached the crawl has finished
 self.dedicatedSE: Specify a list of storage elements (SE) which the crawler should compare to. If we check only for SE X and Ia file is shown on the federation website to be available on SE X but the catalog only shows Y and Z then this file will be shown as missing on X. If the federation shows files to be on Y and Z it doesn't check whether
